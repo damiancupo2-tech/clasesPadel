@@ -102,29 +102,22 @@ export function Calendar() {
     const newClasses: any[] = [];
     let duplicatesCount = 0;
 
-    // Agrupar clases del mes anterior por fecha para mantener la estructura
-    const classesByDate = new Map();
+    // Procesar cada clase del mes anterior
     prevClasses.forEach(prevClass => {
       const prevDate = new Date(prevClass.date);
-      const dateKey = prevDate.getDate(); // Día del mes (1-31)
+      const dayOfWeek = prevDate.getDay(); // 0 = Domingo, 1 = Lunes, etc.
+      const hours = prevDate.getHours();
+      const minutes = prevDate.getMinutes();
       
-      if (!classesByDate.has(dateKey)) {
-        classesByDate.set(dateKey, []);
-      }
-      classesByDate.get(dateKey).push(prevClass);
-    });
-
-    // Replicar cada día del mes anterior al mes actual
-    classesByDate.forEach((classesInDay, dayOfMonth) => {
-      // Calcular la fecha correspondiente en el mes actual
+      // Encontrar todas las fechas del mes actual que coincidan con el mismo día de la semana
       const daysInCurrentMonth = new Date(currentYear, currentMonth + 1, 0).getDate();
       
-      // Solo replicar si el día existe en el mes actual
-      if (dayOfMonth <= daysInCurrentMonth) {
-        classesInDay.forEach(prevClass => {
-          const prevDate = new Date(prevClass.date);
-          const newDate = new Date(currentYear, currentMonth, dayOfMonth, 
-                                 prevDate.getHours(), prevDate.getMinutes());
+      for (let day = 1; day <= daysInCurrentMonth; day++) {
+        const potentialDate = new Date(currentYear, currentMonth, day);
+        
+        // Si el día de la semana coincide
+        if (potentialDate.getDay() === dayOfWeek) {
+          const newDate = new Date(currentYear, currentMonth, day, hours, minutes);
           
           // Verificar si ya existe una clase idéntica en esa fecha y hora
           const exists = state.classes.some(existingClass => {
@@ -134,7 +127,8 @@ export function Calendar() {
               existingClass.type === prevClass.type &&
               JSON.stringify([...existingClass.students].sort()) === 
               JSON.stringify([...prevClass.students].sort()) &&
-              existingClass.pricePerStudent === prevClass.pricePerStudent
+              existingClass.pricePerStudent === prevClass.pricePerStudent &&
+              existingClass.observations === prevClass.observations
             );
           });
 
@@ -152,7 +146,7 @@ export function Calendar() {
           } else {
             duplicatesCount++;
           }
-        });
+        }
       }
     });
 
@@ -261,18 +255,19 @@ export function Calendar() {
             <h2 className="text-xl font-bold mb-4 text-gray-900">Repetir clases del mes anterior</h2>
             <div className="mb-6 space-y-3">
               <p className="text-gray-700">
-                Esta acción replicará <strong>todas las clases del mes anterior</strong> en el mes actual, manteniendo:
+                Esta acción replicará <strong>todas las clases del mes anterior</strong> en el mes actual por día de la semana, manteniendo:
               </p>
               <ul className="list-disc list-inside text-sm text-gray-600 space-y-1 ml-4">
-                <li>Mismo día del mes (ej: día 15 del mes anterior → día 15 del mes actual)</li>
+                <li>Mismo día de la semana (ej: lunes del mes anterior → todos los lunes del mes actual)</li>
                 <li>Misma hora exacta</li>
                 <li>Mismo precio por alumno</li>
                 <li>Mismos alumnos asignados</li>
                 <li>Mismo tipo de clase (individual/grupal)</li>
+                <li>Mismas observaciones</li>
               </ul>
               <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3 mt-4">
                 <p className="text-sm text-yellow-800">
-                  <strong>Nota:</strong> No se crearán clases duplicadas. Si el mes actual tiene menos días que el anterior, las clases de días inexistentes no se replicarán.
+                  <strong>Ejemplo:</strong> Si Carlos tenía clases los lunes de julio a las 10:00 AM, se crearán clases todos los lunes de agosto a las 10:00 AM con los mismos alumnos y precio.
                 </p>
               </div>
             </div>

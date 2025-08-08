@@ -99,46 +99,63 @@ export function Calendar() {
       return;
     }
 
-    const newClasses: any[] = [];
-    let duplicatesCount = 0;
-
-    // Procesar cada clase del mes anterior
+    // Agrupar clases por patrón único (día de semana + hora + alumnos + precio + tipo)
+    const classPatterns = new Map();
+    
     prevClasses.forEach(prevClass => {
       const prevDate = new Date(prevClass.date);
-      const dayOfWeek = prevDate.getDay(); // 0 = Domingo, 1 = Lunes, etc.
+      const dayOfWeek = prevDate.getDay();
       const hours = prevDate.getHours();
       const minutes = prevDate.getMinutes();
       
-      // Encontrar todas las fechas del mes actual que coincidan con el mismo día de la semana
+      // Crear clave única para el patrón de clase
+      const patternKey = `${dayOfWeek}-${hours}-${minutes}-${prevClass.type}-${prevClass.pricePerStudent}-${JSON.stringify([...prevClass.students].sort())}-${prevClass.observations}`;
+      
+      // Solo guardar la primera clase de cada patrón único
+      if (!classPatterns.has(patternKey)) {
+        classPatterns.set(patternKey, {
+          ...prevClass,
+          dayOfWeek,
+          hours,
+          minutes
+        });
+      }
+    });
+
+    const newClasses: any[] = [];
+    let duplicatesCount = 0;
+
+    // Para cada patrón único, crear clases en todas las fechas correspondientes del mes actual
+    classPatterns.forEach((classPattern) => {
       const daysInCurrentMonth = new Date(currentYear, currentMonth + 1, 0).getDate();
       
       for (let day = 1; day <= daysInCurrentMonth; day++) {
         const potentialDate = new Date(currentYear, currentMonth, day);
         
         // Si el día de la semana coincide
-        if (potentialDate.getDay() === dayOfWeek) {
-          const newDate = new Date(currentYear, currentMonth, day, hours, minutes);
+        if (potentialDate.getDay() === classPattern.dayOfWeek) {
+          const newDate = new Date(currentYear, currentMonth, day, classPattern.hours, classPattern.minutes);
           
           // Verificar si ya existe una clase idéntica en esa fecha y hora
           const exists = state.classes.some(existingClass => {
             const existingDate = new Date(existingClass.date);
             return (
               existingDate.getTime() === newDate.getTime() &&
-              existingClass.type === prevClass.type &&
+              existingClass.type === classPattern.type &&
               JSON.stringify([...existingClass.students].sort()) === 
-              JSON.stringify([...prevClass.students].sort()) &&
-              existingClass.pricePerStudent === prevClass.pricePerStudent &&
-              existingClass.observations === prevClass.observations
+              JSON.stringify([...classPattern.students].sort()) &&
+              existingClass.pricePerStudent === classPattern.pricePerStudent &&
+              existingClass.observations === classPattern.observations
             );
           });
 
           if (!exists) {
             newClasses.push({
-              ...prevClass,
-              id: `repeat_${prevClass.id}_${newDate.getTime()}`,
+              ...classPattern,
+              id: `repeat_${classPattern.id}_${newDate.getTime()}`,
               date: newDate,
               createdAt: new Date(),
-              parentId: prevClass.id,
+              parentId: classPattern.id,
               repeating: 'none',
               attendances: {}, // Resetear asistencias
               status: 'scheduled' // Resetear estado
@@ -157,7 +174,7 @@ export function Calendar() {
 
     setShowRepeatModal(false);
     
-    let message = `Se han replicado ${newClasses.length} clases del mes anterior.`;
+    let message = `Se han replicado ${newClasses.length} clases basadas en ${classPatterns.size} patrones únicos del mes anterior.`;
     if (duplicatesCount > 0) {
       message += `\n${duplicatesCount} clases ya existían y no se duplicaron.`;
     }

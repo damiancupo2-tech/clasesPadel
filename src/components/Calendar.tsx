@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { useApp } from '../context/AppContext';
 import { ClassForm } from './ClassForm';
 import { AttendanceModal } from './AttendanceModal';
-import { ChevronLeft, ChevronRight, Plus, Trash2, Copy } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Plus, Trash2, Copy, Edit, X, CheckCircle } from 'lucide-react';
 
 export function Calendar() {
   const { state, dispatch } = useApp();
@@ -228,10 +228,16 @@ export function Calendar() {
                   <div className="text-sm font-medium">{dt.getDate()}</div>
                   {getClassesForDate(dt).map(cls => (
                     <div key={cls.id} className="text-xs p-1 rounded border truncate bg-yellow-100 relative">
-                      <div className="font-semibold" onClick={e => handleClassClick(cls, e)}>
+                      <div 
+                        className="font-semibold cursor-pointer hover:bg-yellow-200 transition-colors" 
+                        onClick={e => handleClassClick(cls, e)}
+                      >
                         {new Date(cls.date).toLocaleTimeString('es-AR', {hour:'2-digit',minute:'2-digit'})}
                       </div>
-                      <div onClick={e => handleClassClick(cls, e)}>
+                      <div 
+                        className="cursor-pointer hover:bg-yellow-200 transition-colors" 
+                        onClick={e => handleClassClick(cls, e)}
+                      >
                         {cls.type === 'individual'
                           ? 'Individual'
                           : `Grupal (${cls.students.length}/${cls.maxStudents})`}
@@ -254,13 +260,130 @@ export function Calendar() {
       )}
 
       {showDeleteConfirm && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4">
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-lg p-6 w-full max-w-md">
-            <div className="flex items-center mb-4"><Trash2 size={24} className="text-red-600"/><h2 className="text-xl font-bold ml-2">Confirmar eliminación</h2></div>
-            <p className="mb-4">¿Eliminar esta clase?</p>
-            <div className="flex gap-2">
-              <button onClick={() => setShowDeleteConfirm(null)} className="flex-1 bg-gray-100 px-4 py-2 rounded-md">Cancelar</button>
-              <button onClick={confirmDeleteClass} className="flex-1 bg-red-600 text-white px-4 py-2 rounded-md">Eliminar</button>
+            <div className="flex justify-between items-center mb-4">
+              <h2 className="text-xl font-bold text-gray-900">Detalles de la Clase</h2>
+            <div className="bg-gray-50 rounded-lg p-3 mb-4">
+              <p className="text-sm text-gray-700">
+                <strong>Clase:</strong> {showDeleteConfirm.observations || `${showDeleteConfirm.type === 'individual' ? 'Individual' : 'Grupal'}`}
+              </p>
+              <p className="text-sm text-gray-700">
+                <strong>Fecha:</strong> {new Date(showDeleteConfirm.date).toLocaleDateString('es-AR')} a las {new Date(showDeleteConfirm.date).toLocaleTimeString('es-AR', {hour:'2-digit',minute:'2-digit'})}
+              </p>
+            </div>
+              <button 
+                onClick={() => setSelectedClass(null)} 
+                className="text-gray-400 hover:text-gray-600"
+              >
+                <X size={24} />
+              </button>
+            </div>
+            
+            <div className="space-y-3 mb-6">
+              <div className="bg-gray-50 rounded-lg p-4">
+                <div className="grid grid-cols-2 gap-4 text-sm">
+                  <div>
+                    <span className="font-medium text-gray-700">Fecha:</span>
+                    <p className="text-gray-900">
+                      {new Date(selectedClass.date).toLocaleDateString('es-AR', {
+                        weekday: 'long',
+                        year: 'numeric',
+                        month: 'long',
+                        day: 'numeric'
+                      })}
+                    </p>
+                  </div>
+                  <div>
+                    <span className="font-medium text-gray-700">Hora:</span>
+                    <p className="text-gray-900">
+                      {new Date(selectedClass.date).toLocaleTimeString('es-AR', {
+                        hour: '2-digit',
+                        minute: '2-digit'
+                      })}
+                    </p>
+                  </div>
+                  <div>
+                    <span className="font-medium text-gray-700">Tipo:</span>
+                    <p className="text-gray-900">
+                      {selectedClass.type === 'individual' ? 'Individual' : 'Grupal'}
+                    </p>
+                  </div>
+                  <div>
+                    <span className="font-medium text-gray-700">Precio:</span>
+                    <p className="text-gray-900">
+                      {new Intl.NumberFormat('es-AR', {
+                        style: 'currency',
+                        currency: 'ARS'
+                      }).format(selectedClass.pricePerStudent)}
+                    </p>
+                  </div>
+                </div>
+                
+                {selectedClass.observations && (
+                  <div className="mt-3 pt-3 border-t border-gray-200">
+                    <span className="font-medium text-gray-700">Observaciones:</span>
+                    <p className="text-gray-900 mt-1">{selectedClass.observations}</p>
+                  </div>
+                )}
+              </div>
+              
+              <div>
+                <span className="font-medium text-gray-700">Alumnos asignados:</span>
+                <div className="mt-2 space-y-1">
+                  {selectedClass.students.length === 0 ? (
+                    <p className="text-gray-500 text-sm">No hay alumnos asignados</p>
+                  ) : (
+                    selectedClass.students.map(studentId => {
+                      const student = state.students.find(s => s.id === studentId);
+                      return (
+                        <div key={studentId} className="flex items-center justify-between bg-blue-50 px-3 py-2 rounded-md">
+                          <span className="text-blue-900 font-medium">
+                            {student?.name || 'Alumno no encontrado'}
+                          </span>
+                          {selectedClass.attendances?.[studentId] !== undefined && (
+                            <span className={`text-xs px-2 py-1 rounded-full ${
+                              selectedClass.attendances[studentId] 
+                                ? 'bg-green-100 text-green-800' 
+                                : 'bg-red-100 text-red-800'
+                            }`}>
+                              {selectedClass.attendances[studentId] ? 'Presente' : 'Ausente'}
+                            </span>
+                          )}
+                        </div>
+                      );
+                    })
+                  )}
+                </div>
+              </div>
+            </div>
+            
+            <div className="flex gap-3">
+              <button
+                onClick={() => handleEditClass(selectedClass)}
+                className="flex-1 bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 transition-colors flex items-center justify-center gap-2"
+              >
+                <Edit size={18} />
+                Editar Clase
+              </button>
+              <button
+                onClick={() => handleDeleteClass(selectedClass)}
+                className="flex-1 bg-red-600 text-white px-4 py-2 rounded-md hover:bg-red-700 transition-colors flex items-center justify-center gap-2"
+              >
+                <Trash2 size={18} />
+                Eliminar
+              </button>
+            </div>
+            
+            {selectedClass.status === 'scheduled' && (
+              <button
+                onClick={() => setShowAttendanceModal(true)}
+                className="w-full mt-3 bg-green-600 text-white px-4 py-2 rounded-md hover:bg-green-700 transition-colors flex items-center justify-center gap-2"
+              >
+                <CheckCircle size={18} />
+                Registrar Asistencia
+              </button>
+            )}
             </div>
           </div>
         </div>

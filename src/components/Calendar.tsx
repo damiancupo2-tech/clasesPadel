@@ -61,25 +61,20 @@ export function Calendar() {
 
   const handleDeleteClass = (cls: any) => {
     setShowDeleteConfirm(cls);
-    setSelectedClass(null);
   };
 
   const confirmDeleteClass = () => {
     if (showDeleteConfirm) {
       dispatch({ type: 'DELETE_CLASS', payload: showDeleteConfirm.id });
       setShowDeleteConfirm(null);
+      setSelectedClass(null);
     }
-  };
-
-  const handleRepeatPreviousMonth = () => {
-    setShowRepeatModal(true);
   };
 
   const confirmRepeatPreviousMonth = () => {
     const currentMonth = currentDate.getMonth();
     const currentYear = currentDate.getFullYear();
-    
-    // Obtener el mes anterior
+
     let prevMonth = currentMonth - 1;
     let prevYear = currentYear;
     if (prevMonth < 0) {
@@ -87,7 +82,6 @@ export function Calendar() {
       prevYear = currentYear - 1;
     }
 
-    // Obtener todas las clases del mes anterior
     const prevClasses = state.classes.filter(cls => {
       const clsDate = new Date(cls.date);
       return clsDate.getMonth() === prevMonth && clsDate.getFullYear() === prevYear;
@@ -99,19 +93,17 @@ export function Calendar() {
       return;
     }
 
-    // Agrupar clases por patrón único (día de semana + hora + alumnos + precio + tipo)
-    const classPatterns = new Map();
-    
+    const classPatterns = new Map<string, any>();
     prevClasses.forEach(prevClass => {
       const prevDate = new Date(prevClass.date);
       const dayOfWeek = prevDate.getDay();
       const hours = prevDate.getHours();
       const minutes = prevDate.getMinutes();
-      
-      // Crear clave única para el patrón de clase
-      const patternKey = `${dayOfWeek}-${hours}-${minutes}-${prevClass.type}-${prevClass.pricePerStudent}-${JSON.stringify([...prevClass.students].sort())}-${prevClass.observations}`;
-      
-      // Solo guardar la primera clase de cada patrón único
+
+      const patternKey = `${dayOfWeek}-${hours}-${minutes}-${prevClass.type}-${prevClass.pricePerStudent}-${JSON.stringify(
+        [...prevClass.students].sort()
+      )}-${prevClass.observations || ''}`;
+
       if (!classPatterns.has(patternKey)) {
         classPatterns.set(patternKey, {
           ...prevClass,
@@ -125,27 +117,24 @@ export function Calendar() {
     const newClasses: any[] = [];
     let duplicatesCount = 0;
 
-    // Para cada patrón único, crear clases en todas las fechas correspondientes del mes actual
     classPatterns.forEach((classPattern) => {
       const daysInCurrentMonth = new Date(currentYear, currentMonth + 1, 0).getDate();
-      
+
       for (let day = 1; day <= daysInCurrentMonth; day++) {
         const potentialDate = new Date(currentYear, currentMonth, day);
-        
-        // Si el día de la semana coincide
+
         if (potentialDate.getDay() === classPattern.dayOfWeek) {
           const newDate = new Date(currentYear, currentMonth, day, classPattern.hours, classPattern.minutes);
-          
-          // Verificar si ya existe una clase idéntica en esa fecha y hora
+
           const exists = state.classes.some(existingClass => {
             const existingDate = new Date(existingClass.date);
             return (
               existingDate.getTime() === newDate.getTime() &&
               existingClass.type === classPattern.type &&
-              JSON.stringify([...existingClass.students].sort()) === 
+              JSON.stringify([...existingClass.students].sort()) ===
               JSON.stringify([...classPattern.students].sort()) &&
               existingClass.pricePerStudent === classPattern.pricePerStudent &&
-              existingClass.observations === classPattern.observations
+              (existingClass.observations || '') === (classPattern.observations || '')
             );
           });
 
@@ -157,8 +146,8 @@ export function Calendar() {
               createdAt: new Date(),
               parentId: classPattern.id,
               repeating: 'none',
-              attendances: {}, // Resetear asistencias
-              status: 'scheduled' // Resetear estado
+              attendances: {},
+              status: 'scheduled'
             });
           } else {
             duplicatesCount++;
@@ -167,18 +156,16 @@ export function Calendar() {
       }
     });
 
-    // Crear las nuevas clases
     newClasses.forEach(newClass => {
       dispatch({ type: 'ADD_CLASS', payload: newClass });
     });
 
     setShowRepeatModal(false);
-    
+
     let message = `Se han replicado ${newClasses.length} clases basadas en ${classPatterns.size} patrones únicos del mes anterior.`;
     if (duplicatesCount > 0) {
       message += `\n${duplicatesCount} clases ya existían y no se duplicaron.`;
     }
-    
     alert(message);
   };
 
@@ -228,14 +215,14 @@ export function Calendar() {
                   <div className="text-sm font-medium">{dt.getDate()}</div>
                   {getClassesForDate(dt).map(cls => (
                     <div key={cls.id} className="text-xs p-1 rounded border truncate bg-yellow-100 relative">
-                      <div 
-                        className="font-semibold cursor-pointer hover:bg-yellow-200 transition-colors" 
+                      <div
+                        className="font-semibold cursor-pointer hover:bg-yellow-200 transition-colors"
                         onClick={e => handleClassClick(cls, e)}
                       >
-                        {new Date(cls.date).toLocaleTimeString('es-AR', {hour:'2-digit',minute:'2-digit'})}
+                        {new Date(cls.date).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' })}
                       </div>
-                      <div 
-                        className="cursor-pointer hover:bg-yellow-200 transition-colors" 
+                      <div
+                        className="cursor-pointer hover:bg-yellow-200 transition-colors"
                         onClick={e => handleClassClick(cls, e)}
                       >
                         {cls.type === 'individual'
@@ -259,82 +246,85 @@ export function Calendar() {
         />
       )}
 
-      {showDeleteConfirm && (
+      {/* Modal de DETALLES de clase */}
+      {selectedClass && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-lg p-6 w-full max-w-md">
             <div className="flex justify-between items-center mb-4">
               <h2 className="text-xl font-bold text-gray-900">Detalles de la Clase</h2>
-            <div className="bg-gray-50 rounded-lg p-3 mb-4">
-              <p className="text-sm text-gray-700">
-                <strong>Clase:</strong> {showDeleteConfirm.observations || `${showDeleteConfirm.type === 'individual' ? 'Individual' : 'Grupal'}`}
-              </p>
-              <p className="text-sm text-gray-700">
-                <strong>Fecha:</strong> {new Date(showDeleteConfirm.date).toLocaleDateString('es-AR')} a las {new Date(showDeleteConfirm.date).toLocaleTimeString('es-AR', {hour:'2-digit',minute:'2-digit'})}
-              </p>
-            </div>
-              <button 
-                onClick={() => setSelectedClass(null)} 
+              <button
+                onClick={() => setSelectedClass(null)}
                 className="text-gray-400 hover:text-gray-600"
+                aria-label="Cerrar"
               >
                 <X size={24} />
               </button>
             </div>
-            
+
+            <div className="bg-gray-50 rounded-lg p-3 mb-4">
+              <p className="text-sm text-gray-700">
+                <strong>Clase:</strong>{' '}
+                {selectedClass.observations || (selectedClass.type === 'individual' ? 'Individual' : 'Grupal')}
+              </p>
+              <p className="text-sm text-gray-700">
+                <strong>Fecha:</strong>{' '}
+                {new Date(selectedClass.date).toLocaleDateString('es-AR')} a las{' '}
+                {new Date(selectedClass.date).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' })}
+              </p>
+            </div>
+
             <div className="space-y-3 mb-6">
-              <div className="bg-gray-50 rounded-lg p-4">
-                <div className="grid grid-cols-2 gap-4 text-sm">
-                  <div>
-                    <span className="font-medium text-gray-700">Fecha:</span>
-                    <p className="text-gray-900">
-                      {new Date(selectedClass.date).toLocaleDateString('es-AR', {
-                        weekday: 'long',
-                        year: 'numeric',
-                        month: 'long',
-                        day: 'numeric'
-                      })}
-                    </p>
-                  </div>
-                  <div>
-                    <span className="font-medium text-gray-700">Hora:</span>
-                    <p className="text-gray-900">
-                      {new Date(selectedClass.date).toLocaleTimeString('es-AR', {
-                        hour: '2-digit',
-                        minute: '2-digit'
-                      })}
-                    </p>
-                  </div>
-                  <div>
-                    <span className="font-medium text-gray-700">Tipo:</span>
-                    <p className="text-gray-900">
-                      {selectedClass.type === 'individual' ? 'Individual' : 'Grupal'}
-                    </p>
-                  </div>
-                  <div>
-                    <span className="font-medium text-gray-700">Precio:</span>
-                    <p className="text-gray-900">
-                      {new Intl.NumberFormat('es-AR', {
-                        style: 'currency',
-                        currency: 'ARS'
-                      }).format(selectedClass.pricePerStudent)}
-                    </p>
-                  </div>
+              <div className="grid grid-cols-2 gap-4 text-sm">
+                <div>
+                  <span className="font-medium text-gray-700">Fecha:</span>
+                  <p className="text-gray-900">
+                    {new Date(selectedClass.date).toLocaleDateString('es-AR', {
+                      weekday: 'long',
+                      year: 'numeric',
+                      month: 'long',
+                      day: 'numeric'
+                    })}
+                  </p>
                 </div>
-                
-                {selectedClass.observations && (
-                  <div className="mt-3 pt-3 border-t border-gray-200">
-                    <span className="font-medium text-gray-700">Observaciones:</span>
-                    <p className="text-gray-900 mt-1">{selectedClass.observations}</p>
-                  </div>
-                )}
+                <div>
+                  <span className="font-medium text-gray-700">Hora:</span>
+                  <p className="text-gray-900">
+                    {new Date(selectedClass.date).toLocaleTimeString('es-AR', {
+                      hour: '2-digit',
+                      minute: '2-digit'
+                    })}
+                  </p>
+                </div>
+                <div>
+                  <span className="font-medium text-gray-700">Tipo:</span>
+                  <p className="text-gray-900">
+                    {selectedClass.type === 'individual' ? 'Individual' : 'Grupal'}
+                  </p>
+                </div>
+                <div>
+                  <span className="font-medium text-gray-700">Precio:</span>
+                  <p className="text-gray-900">
+                    {new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS' }).format(
+                      selectedClass.pricePerStudent
+                    )}
+                  </p>
+                </div>
               </div>
-              
+
+              {selectedClass.observations && (
+                <div className="pt-3 border-t border-gray-200">
+                  <span className="font-medium text-gray-700">Observaciones:</span>
+                  <p className="text-gray-900 mt-1">{selectedClass.observations}</p>
+                </div>
+              )}
+
               <div>
                 <span className="font-medium text-gray-700">Alumnos asignados:</span>
                 <div className="mt-2 space-y-1">
                   {selectedClass.students.length === 0 ? (
                     <p className="text-gray-500 text-sm">No hay alumnos asignados</p>
                   ) : (
-                    selectedClass.students.map(studentId => {
+                    selectedClass.students.map((studentId: string) => {
                       const student = state.students.find(s => s.id === studentId);
                       return (
                         <div key={studentId} className="flex items-center justify-between bg-blue-50 px-3 py-2 rounded-md">
@@ -342,11 +332,13 @@ export function Calendar() {
                             {student?.name || 'Alumno no encontrado'}
                           </span>
                           {selectedClass.attendances?.[studentId] !== undefined && (
-                            <span className={`text-xs px-2 py-1 rounded-full ${
-                              selectedClass.attendances[studentId] 
-                                ? 'bg-green-100 text-green-800' 
-                                : 'bg-red-100 text-red-800'
-                            }`}>
+                            <span
+                              className={`text-xs px-2 py-1 rounded-full ${
+                                selectedClass.attendances[studentId]
+                                  ? 'bg-green-100 text-green-800'
+                                  : 'bg-red-100 text-red-800'
+                              }`}
+                            >
                               {selectedClass.attendances[studentId] ? 'Presente' : 'Ausente'}
                             </span>
                           )}
@@ -357,7 +349,7 @@ export function Calendar() {
                 </div>
               </div>
             </div>
-            
+
             <div className="flex gap-3">
               <button
                 onClick={() => handleEditClass(selectedClass)}
@@ -374,7 +366,7 @@ export function Calendar() {
                 Eliminar
               </button>
             </div>
-            
+
             {selectedClass.status === 'scheduled' && (
               <button
                 onClick={() => setShowAttendanceModal(true)}
@@ -384,13 +376,41 @@ export function Calendar() {
                 Registrar Asistencia
               </button>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* Modal de CONFIRMACIÓN de borrado */}
+      {showDeleteConfirm && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-lg p-6 w-full max-w-sm">
+            <h3 className="text-lg font-semibold text-gray-900 mb-2">Eliminar clase</h3>
+            <p className="text-sm text-gray-700 mb-4">
+              ¿Seguro que querés eliminar la clase del{' '}
+              {new Date(showDeleteConfirm.date).toLocaleDateString('es-AR')} a las{' '}
+              {new Date(showDeleteConfirm.date).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' })}?
+            </p>
+            <div className="flex gap-2">
+              <button
+                onClick={() => setShowDeleteConfirm(null)}
+                className="flex-1 bg-gray-100 text-gray-800 px-4 py-2 rounded-md hover:bg-gray-200"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={confirmDeleteClass}
+                className="flex-1 bg-red-600 text-white px-4 py-2 rounded-md hover:bg-red-700"
+              >
+                Eliminar
+              </button>
             </div>
           </div>
         </div>
       )}
 
+      {/* Modal de REPLICACIÓN */}
       {showRepeatModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4">
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-lg p-6 w-full max-w-md">
             <h2 className="text-xl font-bold mb-4 text-gray-900">Repetir clases del mes anterior</h2>
             <div className="mb-6 space-y-3">
@@ -398,7 +418,7 @@ export function Calendar() {
                 Esta acción replicará <strong>todas las clases del mes anterior</strong> en el mes actual por día de la semana, manteniendo:
               </p>
               <ul className="list-disc list-inside text-sm text-gray-600 space-y-1 ml-4">
-                <li>Mismo día de la semana (ej: lunes del mes anterior → todos los lunes del mes actual)</li>
+                <li>Mismo día de la semana</li>
                 <li>Misma hora exacta</li>
                 <li>Mismo precio por alumno</li>
                 <li>Mismos alumnos asignados</li>
@@ -407,19 +427,19 @@ export function Calendar() {
               </ul>
               <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3 mt-4">
                 <p className="text-sm text-yellow-800">
-                  <strong>Ejemplo:</strong> Si Carlos tenía clases los lunes de julio a las 10:00 AM, se crearán clases todos los lunes de agosto a las 10:00 AM con los mismos alumnos y precio.
+                  <strong>Ejemplo:</strong> Si Carlos tenía clases los lunes del mes pasado a las 10:00, se crearán clases todos los lunes del mes actual a las 10:00 con los mismos alumnos y precio.
                 </p>
               </div>
             </div>
             <div className="flex gap-2">
-              <button 
-                onClick={() => setShowRepeatModal(false)} 
+              <button
+                onClick={() => setShowRepeatModal(false)}
                 className="flex-1 bg-gray-100 text-gray-700 px-4 py-2 rounded-md hover:bg-gray-200 transition-colors"
               >
                 Cancelar
               </button>
-              <button 
-                onClick={confirmRepeatPreviousMonth} 
+              <button
+                onClick={confirmRepeatPreviousMonth}
                 className="flex-1 bg-indigo-600 text-white px-4 py-2 rounded-md hover:bg-indigo-700 transition-colors"
               >
                 Confirmar Replicación
@@ -430,7 +450,10 @@ export function Calendar() {
       )}
 
       {showAttendanceModal && selectedClass && (
-        <AttendanceModal classData={selectedClass} onClose={() => { setShowAttendanceModal(false); setSelectedClass(null); }} />
+        <AttendanceModal
+          classData={selectedClass}
+          onClose={() => { setShowAttendanceModal(false); setSelectedClass(null); }}
+        />
       )}
     </div>
   );

@@ -15,6 +15,7 @@ type Action =
   | { type: 'UPDATE_CLASS'; payload: Class }
   | { type: 'DELETE_CLASS'; payload: string }
   | { type: 'UPDATE_TRANSACTION_STATUS'; payload: { id: string; status: 'Pendiente' | 'Pagado' } }
+  | { type: 'ADD_TRANSACTION'; payload: Transaction }
   | { type: 'ADD_RECEIPT'; payload: Receipt }
   | { type: 'DELETE_RECEIPT'; payload: string }
   | { type: 'SET_USER'; payload: User };
@@ -209,6 +210,14 @@ function appReducer(state: AppState, action: Action): AppState {
         transactions: state.transactions.map(t =>
           t.id === action.payload.id ? { ...t, status: action.payload.status } : t
         )
+      };
+      saveToStorage(STORAGE_KEYS.TRANSACTIONS, newState.transactions);
+      return newState;
+
+    case 'ADD_TRANSACTION':
+      newState = {
+        ...state,
+        transactions: [...state.transactions, action.payload]
       };
       saveToStorage(STORAGE_KEYS.TRANSACTIONS, newState.transactions);
       return newState;

@@ -7,6 +7,10 @@ export function BillingModule() {
   const [selectedStudentId, setSelectedStudentId] = useState<string | null>(null);
   const [paymentMethod, setPaymentMethod] = useState<'cash' | 'transfer' | 'card'>('cash');
   const [selectedTransactions, setSelectedTransactions] = useState<{[key: string]: boolean}>({});
+  const [customAmounts, setCustomAmounts] = useState<{[key: string]: number}>({});
+  const [discounts, setDiscounts] = useState<{[key: string]: number}>({});
+  const [partialPaymentAmount, setPartialPaymentAmount] = useState<number>(0);
+  const [showPartialPayment, setShowPartialPayment] = useState(false);
 
   const pendingTransactions = state.transactions.filter(tx => tx.status === 'Pendiente');
   
@@ -35,6 +39,37 @@ export function BillingModule() {
       ...prev,
       [transactionId]: !prev[transactionId]
     }));
+    
+    // Reset custom amounts and discounts when toggling
+    if (!selectedTransactions[transactionId]) {
+      setCustomAmounts(prev => ({ ...prev, [transactionId]: 0 }));
+      setDiscounts(prev => ({ ...prev, [transactionId]: 0 }));
+    }
+  };
+
+  const handleCustomAmountChange = (transactionId: string, amount: number) => {
+    setCustomAmounts(prev => ({
+      ...prev,
+      [transactionId]: amount
+    }));
+  };
+
+  const handleDiscountChange = (transactionId: string, discount: number) => {
+    setDiscounts(prev => ({
+      ...prev,
+      [transactionId]: discount
+    }));
+  };
+
+  const getTransactionFinalAmount = (transactionId: string, originalAmount: number) => {
+    const customAmount = customAmounts[transactionId];
+    const discount = discounts[transactionId] || 0;
+    
+    if (customAmount > 0) {
+      return customAmount;
+    }
+    
+    return Math.max(0, originalAmount - discount);
   };
 
   const handlePay = (studentId: string) => {
@@ -48,11 +83,42 @@ export function BillingModule() {
       return;
     }
 
-    transactionsToPay.forEach(tx => {
-      dispatch({ type: 'UPDATE_TRANSACTION_STATUS', payload: { id: tx.id, status: 'Pagado' } });
-    });
+    if (showPartialPayment && partialPaymentAmount > 0) {
+      // Pago parcial
+      handlePartialPayment(studentId, transactionsToPay);
+    } else {
+      // Pago completo con montos personalizados/descuentos
+      transactionsToPay.forEach(tx => {
+        const finalAmount = getTransactionFinalAmount(tx.id, tx.amount);
+        
+        if (finalAmount < tx.amount) {
+          // Crear nueva transacción por la diferencia
+          const remainingAmount = tx.amount - finalAmount;
+          const newTransaction = {
+            id: `${tx.id}_remaining_${Date.now()}`,
+            studentId: tx.studentId,
+            studentName: tx.studentName,
+            classId: tx.classId,
+            className: tx.className,
+            type: 'charge' as const,
+            amount: remainingAmount,
+            date: new Date(),
+            description: `${tx.description} - Saldo restante`,
+            status: 'Pendiente' as const
+          };
+          
+          // Agregar nueva transacción por el saldo
+          dispatch({ type: 'ADD_TRANSACTION', payload: newTransaction });
+        }
+        
+        // Marcar la transacción original como pagada
+        dispatch({ type: 'UPDATE_TRANSACTION_STATUS', payload: { id: tx.id, status: 'Pagado' } });
+      });
+    }
 
-    const totalAmount = transactionsToPay.reduce((sum, tx) => sum + tx.amount, 0);
+    const totalAmount = showPartialPayment 
+      ? partialPaymentAmount
+      : transactionsToPay.reduce((sum, tx) => sum + getTransactionFinalAmount(tx.id, tx.amount), 0);
 
     const receipt = {
       id: `${studentId}_${Date.now()}`,
@@ -64,13 +130,58 @@ export function BillingModule() {
         id: tx.id,
         className: tx.className,
         date: tx.date,
-        amount: tx.amount
+        amount: showPartialPayment 
+          ? (partialPaymentAmount * tx.amount) / transactionsToPay.reduce((sum, t) => sum + t.amount, 0)
+          : getTransactionFinalAmount(tx.id, tx.amount)
       })),
     };
 
     dispatch({ type: 'ADD_RECEIPT', payload: receipt });
+    
+    // Reset states
     setSelectedTransactions({});
+    setCustomAmounts({});
+    setDiscounts({});
+    setPartialPaymentAmount(0);
+    setShowPartialPayment(false);
     setSelectedStudentId(null);
+  };
+
+  const handlePartialPayment = (studentId: string, transactions: any[]) => {
+    const totalDebt = transactions.reduce((sum, tx) => sum + tx.amount, 0);
+    
+    if (partialPaymentAmount >= totalDebt) {
+      // Si el pago cubre toda la deuda, marcar como pagado
+      transactions.forEach(tx => {
+        dispatch({ type: 'UPDATE_TRANSACTION_STATUS', payload: { id: tx.id, status: 'Pagado' } });
+      });
+    } else {
+      // Pago parcial: crear nuevas transacciones por el saldo
+      transactions.forEach(tx => {
+        const proportionalPayment = (partialPaymentAmount * tx.amount) / totalDebt;
+        const remainingAmount = tx.amount - proportionalPayment;
+        
+        if (remainingAmount > 0) {
+          const newTransaction = {
+            id: `${tx.id}_partial_${Date.now()}`,
+            studentId: tx.studentId,
+            studentName: tx.studentName,
+            classId: tx.classId,
+            className: tx.className,
+            type: 'charge' as const,
+            amount: remainingAmount,
+            date: new Date(),
+            description: `${tx.description} - Saldo restante`,
+            status: 'Pendiente' as const
+          };
+          
+          dispatch({ type: 'ADD_TRANSACTION', payload: newTransaction });
+        }
+        
+        // Marcar la transacción original como pagada
+        dispatch({ type: 'UPDATE_TRANSACTION_STATUS', payload: { id: tx.id, status: 'Pagado' } });
+      });
+    }
   };
 
   const exportToCSV = () => {
@@ -259,23 +370,86 @@ export function BillingModule() {
                             </p>
                           </div>
                         </div>
-                        <span className="font-medium text-green-600">
-                          {formatCurrency(tx.amount)}
-                        </span>
+                        <div className="flex flex-col items-end gap-1">
+                          <span className="font-medium text-green-600">
+                            {formatCurrency(getTransactionFinalAmount(tx.id, tx.amount))}
+                          </span>
+                          {selectedTransactions[tx.id] !== false && (
+                            <div className="flex gap-1 text-xs">
+                              <input
+                                type="number"
+                                placeholder="Monto custom"
+                                value={customAmounts[tx.id] || ''}
+                                onChange={(e) => handleCustomAmountChange(tx.id, parseFloat(e.target.value) || 0)}
+                                className="w-20 px-1 py-0.5 border rounded text-xs"
+                              />
+                              <input
+                                type="number"
+                                placeholder="Descuento"
+                                value={discounts[tx.id] || ''}
+                                onChange={(e) => handleDiscountChange(tx.id, parseFloat(e.target.value) || 0)}
+                                className="w-20 px-1 py-0.5 border rounded text-xs"
+                              />
+                            </div>
+                          )}
+                          {tx.amount !== getTransactionFinalAmount(tx.id, tx.amount) && (
+                            <span className="text-xs text-gray-500 line-through">
+                              {formatCurrency(tx.amount)}
+                            </span>
+                          )}
+                        </div>
                       </div>
                     ))}
                   </div>
                   
                   <div className="border-t pt-3">
-                    <div className="flex justify-between items-center mb-3">
-                      <span className="font-medium">Total a cobrar:</span>
-                      <span className="text-lg font-bold text-green-600">
-                        {formatCurrency(
-                          group.transactions
-                            .filter(tx => selectedTransactions[tx.id] !== false)
-                            .reduce((sum, tx) => sum + tx.amount, 0)
-                        )}
-                      </span>
+                    <div className="space-y-3">
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="checkbox"
+                          checked={showPartialPayment}
+                          onChange={(e) => setShowPartialPayment(e.target.checked)}
+                          className="h-4 w-4 text-blue-600 rounded"
+                        />
+                        <label className="text-sm font-medium">Pago parcial</label>
+                      </div>
+                      
+                      {showPartialPayment && (
+                        <div className="bg-yellow-50 p-3 rounded-lg">
+                          <label className="block text-sm font-medium mb-1">Monto del pago parcial:</label>
+                          <input
+                            type="number"
+                            value={partialPaymentAmount}
+                            onChange={(e) => setPartialPaymentAmount(parseFloat(e.target.value) || 0)}
+                            className="w-full px-3 py-2 border border-yellow-300 rounded-md"
+                            placeholder="Ingrese el monto que paga el alumno"
+                          />
+                        </div>
+                      )}
+                      
+                      <div className="flex justify-between items-center">
+                        <span className="font-medium">Total a cobrar:</span>
+                        <span className="text-lg font-bold text-green-600">
+                          {showPartialPayment 
+                            ? formatCurrency(partialPaymentAmount)
+                            : formatCurrency(
+                                group.transactions
+                                  .filter(tx => selectedTransactions[tx.id] !== false)
+                                  .reduce((sum, tx) => sum + getTransactionFinalAmount(tx.id, tx.amount), 0)
+                              )
+                          }
+                        </span>
+                      </div>
+                      
+                      {!showPartialPayment && (
+                        <div className="text-xs text-gray-500">
+                          Total original: {formatCurrency(
+                            group.transactions
+                              .filter(tx => selectedTransactions[tx.id] !== false)
+                              .reduce((sum, tx) => sum + tx.amount, 0)
+                          )}
+                        </div>
+                      )}
                     </div>
                   </div>
 
@@ -301,7 +475,8 @@ export function BillingModule() {
                     </button>
                     <button
                       onClick={() => handlePay(studentId)}
-                      className="flex-1 flex items-center justify-center gap-2 px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700"
+                      disabled={showPartialPayment && partialPaymentAmount <= 0}
+                      className="flex-1 flex items-center justify-center gap-2 px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed"
                     >
                       <CheckCircle size={18} />
                       Confirmar Pago

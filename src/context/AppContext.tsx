@@ -1,10 +1,17 @@
 import React, { createContext, useContext, useReducer, useEffect } from 'react';
 import {
   AppState, Student, Class, Payment, Invoice, Transaction,
-  User, Receipt
+  User, Receipt, AccountEntry
 } from '../types';
 import { loadFromStorage, saveToStorage, STORAGE_KEYS } from '../utils/storage';
 import { generateRecurringClasses } from '../utils/classRecurrence';
+
+type ApplyDiscountPayload = {
+  studentId: string;
+  mode: 'amount' | 'percent';
+  value: number;          // si mode === 'percent' es 0-100
+  note?: string;
+};
 
 type Action =
   | { type: 'LOAD_DATA'; payload: Partial<AppState> }
@@ -14,10 +21,12 @@ type Action =
   | { type: 'ADD_CLASS'; payload: Class }
   | { type: 'UPDATE_CLASS'; payload: Class }
   | { type: 'DELETE_CLASS'; payload: string }
+  | { type: 'RECORD_ATTENDANCE'; payload: { studentId: string; classId: string; attendanceStatus: 'Presente' | 'Ausente'; amount: number; date: Date | string; className: string } }
   | { type: 'UPDATE_TRANSACTION_STATUS'; payload: { id: string; status: 'Pendiente' | 'Pagado' } }
   | { type: 'ADD_TRANSACTION'; payload: Transaction }
   | { type: 'ADD_RECEIPT'; payload: Receipt }
   | { type: 'DELETE_RECEIPT'; payload: string }
+  | { type: 'APPLY_DISCOUNT'; payload: ApplyDiscountPayload }
   | { type: 'SET_USER'; payload: User };
 
 const initialState: AppState = {
@@ -152,17 +161,17 @@ function appReducer(state: AppState, action: Action): AppState {
       const { studentId, classId, attendanceStatus, amount, date, className } = action.payload;
 
       if (attendanceStatus === 'Presente') {
-        const transaction = {
+        const transaction: Transaction = {
           id: `${classId}_${studentId}_${Date.now()}`,
           studentId,
           studentName: state.students.find(s => s.id === studentId)?.name || '',
           classId,
           className,
-          type: 'charge' as const,
+          type: 'charge',
           amount,
           date: new Date(date),
           description: `Clase - ${className}`,
-          status: 'Pendiente' as const
+          status: 'Pendiente'
         };
 
         newState = {
@@ -175,14 +184,15 @@ function appReducer(state: AppState, action: Action): AppState {
 
       const updatedStudents = state.students.map(student => {
         if (student.id === studentId) {
-          const accountEntry = {
+          const accountEntry: AccountEntry = {
             id: `${classId}_${studentId}_${Date.now()}`,
             date: new Date(date),
             className,
             classId,
             attendanceStatus,
             amount: attendanceStatus === 'Presente' ? amount : 0,
-            createdAt: new Date()
+            createdAt: new Date(),
+            kind: 'class'
           };
 
           return {
@@ -232,6 +242,74 @@ function appReducer(state: AppState, action: Action): AppState {
       saveToStorage('receipts', newState.receipts);
       return newState;
 
+    case 'APPLY_DISCOUNT': {
+      const { studentId, mode, value, note } = action.payload;
+
+      // Total pendiente del alumno por transacciones en estado "Pendiente"
+      const pendingTx = state.transactions.filter(t => t.studentId === studentId && t.status === 'Pendiente' && t.amount > 0);
+      const totalPending = pendingTx.reduce((acc, t) => acc + t.amount, 0);
+
+      if (totalPending <= 0) return state;
+
+      const discountAmount = Math.min(
+        mode === 'amount' ? value : (totalPending * (value / 100)),
+        totalPending
+      );
+
+      // Marca todas como Pagado por "descuento" (no genera saldo pendiente)
+      const updatedTransactions = state.transactions.map(t => {
+        if (t.studentId === studentId && t.status === 'Pendiente' && discountAmount > 0) {
+          return { ...t, status: 'Pagado', settlementKind: 'discount', description: `${t.description} (Descuento)` };
+        }
+        return t;
+      });
+
+      // Crea un asiento de "pago/ajuste" tipo descuento para auditoría (monto negativo en historial)
+      const discountTransaction: Transaction = {
+        id: `discount_${studentId}_${Date.now()}`,
+        studentId,
+        studentName: state.students.find(s => s.id === studentId)?.name || '',
+        className: 'Descuento sobre total',
+        type: 'payment',
+        amount: 0, // No suma pagos, solo marca como saldados por descuento
+        date: new Date(),
+        description: `Descuento aplicado: ${mode === 'amount' ? `-$${discountAmount.toFixed(2)}` : `-${value}%`} sobre total`,
+        status: 'Pagado',
+        settlementKind: 'discount'
+      };
+
+      // Actualiza saldo del alumno (resta el descuento)
+      const updatedStudents = state.students.map(st => {
+        if (st.id !== studentId) return st;
+        const entry: AccountEntry = {
+          id: `disc_${studentId}_${Date.now()}`,
+          date: new Date(),
+          className: 'Descuento sobre total',
+          classId: 'descuento-total',
+          attendanceStatus: 'Presente', // neutro para compatibilidad
+          amount: -discountAmount,
+          createdAt: new Date(),
+          kind: 'discount',
+          note
+        };
+        return {
+          ...st,
+          accountHistory: [...(st.accountHistory || []), entry],
+          currentBalance: Math.max(0, st.currentBalance - discountAmount)
+        };
+      });
+
+      newState = {
+        ...state,
+        students: updatedStudents,
+        transactions: [...updatedTransactions, discountTransaction]
+      };
+
+      saveToStorage(STORAGE_KEYS.STUDENTS, newState.students);
+      saveToStorage(STORAGE_KEYS.TRANSACTIONS, newState.transactions);
+      return newState;
+    }
+
     case 'SET_USER':
       newState = { ...state, currentUser: action.payload };
       saveToStorage(STORAGE_KEYS.CURRENT_USER, newState.currentUser);
@@ -255,7 +333,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     const classes = loadFromStorage(STORAGE_KEYS.CLASSES) || [];
     const payments = loadFromStorage(STORAGE_KEYS.PAYMENTS) || [];
     const invoices = loadFromStorage(STORAGE_KEYS.INVOICES) || [];
-    const transactions = (loadFromStorage(STORAGE_KEYS.TRANSACTIONS) || []).filter((t: Transaction) => t.amount !== 0);
+    const transactions = (loadFromStorage(STORAGE_KEYS.TRANSACTIONS) || []).filter((t: Transaction) => t.amount !== 0 || t.settlementKind === 'discount');
     const receipts = loadFromStorage('receipts') || [];
     const currentUser = loadFromStorage(STORAGE_KEYS.CURRENT_USER) || initialState.currentUser;
 

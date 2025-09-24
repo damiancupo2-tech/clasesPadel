@@ -20,10 +20,10 @@ export interface AccountEntry {
   className: string;
   classId: string;
   attendanceStatus: 'Presente' | 'Ausente';
-  amount: number;               // Para descuentos será negativo
+  amount: number;               // Descuento se registra como negativo
   createdAt: Date;
-  kind?: AccountEntryKind;      // 'discount' para descuentos sobre total
-  note?: string;                // Observación opcional del descuento
+  kind?: AccountEntryKind;      // 'discount' para descuentos
+  note?: string;
 }
 
 export interface Class {
@@ -86,7 +86,7 @@ export interface Transaction {
   description: string;
   status: 'Pendiente' | 'Pagado';
   invoiceId?: string;
-  settlementKind?: 'payment' | 'discount'; // marca cómo se saldó si pasa a Pagado
+  settlementKind?: 'payment' | 'discount';
 }
 
 export interface Receipt {
@@ -98,9 +98,12 @@ export interface Receipt {
     id: string;
     className: string;
     date: Date;
-    amount: number;
+    amount: number; // siempre positivo acá (es el cargo original)
   }[];
-  totalAmount: number;
+  /** Resumen para impresión/listado */
+  totalAmount: number;          // saldo total de cargos (suma de transactions)
+  discountAmount?: number;      // descuento aplicado (>= 0)
+  paidAmount?: number;          // monto abonado final (= totalAmount - discountAmount)
 }
 
 export interface User {

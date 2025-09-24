@@ -1,493 +1,210 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
+import { Search, Percent, BadgeDollarSign, CheckCircle2 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
-import { Receipt, CheckCircle, Calendar, DollarSign, FileText, Download } from 'lucide-react';
+import { formatCurrency } from '../utils/format';
+
+type DiscountMode = 'amount' | 'percent';
 
 export function BillingModule() {
   const { state, dispatch } = useApp();
-  const [selectedStudentId, setSelectedStudentId] = useState<string | null>(null);
-  const [paymentMethod, setPaymentMethod] = useState<'cash' | 'transfer' | 'card'>('cash');
-  const [selectedTransactions, setSelectedTransactions] = useState<{[key: string]: boolean}>({});
-  const [customAmounts, setCustomAmounts] = useState<{[key: string]: number}>({});
-  const [discounts, setDiscounts] = useState<{[key: string]: number}>({});
-  const [partialPaymentAmount, setPartialPaymentAmount] = useState<number>(0);
-  const [showPartialPayment, setShowPartialPayment] = useState(false);
 
-  const pendingTransactions = state.transactions.filter(tx => tx.status === 'Pendiente');
-  
-  const formatCurrency = (amount: number) => {
-    return new Intl.NumberFormat('es-AR', {
-      style: 'currency',
-      currency: 'ARS'
-    }).format(amount);
-  };
-
-  const groupedByStudent = pendingTransactions.reduce((acc, tx) => {
-    if (!acc[tx.studentId]) {
-      acc[tx.studentId] = {
-        studentName: tx.studentName,
-        transactions: [],
-        total: 0
-      };
+  // Total pendiente por alumno (solo transacciones Pendiente)
+  const pendingByStudent = useMemo(() => {
+    const map = new Map<string, { studentId: string; studentName: string; total: number }>();
+    for (const t of state.transactions) {
+      if (t.status === 'Pendiente' && t.amount > 0) {
+        const key = t.studentId;
+        const prev = map.get(key);
+        const total = (prev?.total || 0) + t.amount;
+        map.set(key, { studentId: t.studentId, studentName: t.studentName, total });
+      }
     }
-    acc[tx.studentId].transactions.push(tx);
-    acc[tx.studentId].total += tx.amount;
-    return acc;
-  }, {} as Record<string, { studentName: string; transactions: typeof pendingTransactions; total: number }>);
+    return Array.from(map.values());
+  }, [state.transactions]);
 
-  const handleTransactionToggle = (transactionId: string) => {
-    setSelectedTransactions(prev => ({
-      ...prev,
-      [transactionId]: !prev[transactionId]
-    }));
-    
-    // Reset custom amounts and discounts when toggling
-    if (!selectedTransactions[transactionId]) {
-      setCustomAmounts(prev => ({ ...prev, [transactionId]: 0 }));
-      setDiscounts(prev => ({ ...prev, [transactionId]: 0 }));
-    }
+  const [query, setQuery] = useState('');
+  const sortedFiltered = useMemo(() => {
+    const list = pendingByStudent
+      .filter(s =>
+        s.studentName.toLowerCase().includes(query.toLowerCase())
+      )
+      .sort((a, b) => a.studentName.localeCompare(b.studentName, 'es', { sensitivity: 'base' }));
+    return list;
+  }, [pendingByStudent, query]);
+
+  const [selected, setSelected] = useState<{ studentId: string; studentName: string; total: number } | null>(null);
+  const [mode, setMode] = useState<DiscountMode>('amount');
+  const [amount, setAmount] = useState<number>(0);
+  const [percent, setPercent] = useState<number>(0);
+  const [note, setNote] = useState<string>('');
+
+  const handleSelect = (s: { studentId: string; studentName: string; total: number }) => {
+    setSelected(s);
+    // Resetea inputs
+    setMode('amount');
+    setAmount(0);
+    setPercent(0);
+    setNote('');
   };
 
-  const handleCustomAmountChange = (transactionId: string, amount: number) => {
-    setCustomAmounts(prev => ({
-      ...prev,
-      [transactionId]: amount
-    }));
-  };
-
-  const handleDiscountChange = (transactionId: string, discount: number) => {
-    setDiscounts(prev => ({
-      ...prev,
-      [transactionId]: discount
-    }));
-  };
-
-  const getTransactionFinalAmount = (transactionId: string, originalAmount: number) => {
-    const customAmount = customAmounts[transactionId];
-    const discount = discounts[transactionId] || 0;
-    
-    if (customAmount > 0) {
-      return customAmount;
-    }
-    
-    return Math.max(0, originalAmount - discount);
-  };
-
-  const handlePay = (studentId: string) => {
-    const allTransactions = groupedByStudent[studentId].transactions;
-    const transactionsToPay = allTransactions.filter(tx => 
-      selectedTransactions[tx.id] !== false // Por defecto seleccionadas
-    );
-    
-    if (transactionsToPay.length === 0) {
-      alert('Selecciona al menos una clase para cobrar');
-      return;
-    }
-
-    if (showPartialPayment && partialPaymentAmount > 0) {
-      // Pago parcial
-      handlePartialPayment(studentId, transactionsToPay);
+  const handleSyncInputs = (newMode: DiscountMode, val: number) => {
+    if (!selected) return;
+    if (newMode === 'amount') {
+      // actualizar amount y % calculado
+      const amt = Math.max(0, Math.min(val, selected.total));
+      setAmount(amt);
+      setPercent(selected.total > 0 ? +(amt * 100 / selected.total).toFixed(2) : 0);
     } else {
-      // Pago completo con montos personalizados/descuentos
-      transactionsToPay.forEach(tx => {
-        const finalAmount = getTransactionFinalAmount(tx.id, tx.amount);
-        
-        if (finalAmount < tx.amount) {
-          // Crear nueva transacción por la diferencia
-          const remainingAmount = tx.amount - finalAmount;
-          const newTransaction = {
-            id: `${tx.id}_remaining_${Date.now()}`,
-            studentId: tx.studentId,
-            studentName: tx.studentName,
-            classId: tx.classId,
-            className: tx.className,
-            type: 'charge' as const,
-            amount: remainingAmount,
-            date: new Date(),
-            description: `${tx.description} - Saldo restante`,
-            status: 'Pendiente' as const
-          };
-          
-          // Agregar nueva transacción por el saldo
-          dispatch({ type: 'ADD_TRANSACTION', payload: newTransaction });
-        }
-        
-        // Marcar la transacción original como pagada
-        dispatch({ type: 'UPDATE_TRANSACTION_STATUS', payload: { id: tx.id, status: 'Pagado' } });
-      });
-    }
-
-    const totalAmount = showPartialPayment 
-      ? partialPaymentAmount
-      : transactionsToPay.reduce((sum, tx) => sum + getTransactionFinalAmount(tx.id, tx.amount), 0);
-
-    const receipt = {
-      id: `${studentId}_${Date.now()}`,
-      studentId,
-      studentName: groupedByStudent[studentId].studentName,
-      date: new Date(),
-      totalAmount,
-      transactions: transactionsToPay.map(tx => ({
-        id: tx.id,
-        className: tx.className,
-        date: tx.date,
-        amount: showPartialPayment 
-          ? (partialPaymentAmount * tx.amount) / transactionsToPay.reduce((sum, t) => sum + t.amount, 0)
-          : getTransactionFinalAmount(tx.id, tx.amount)
-      })),
-    };
-
-    dispatch({ type: 'ADD_RECEIPT', payload: receipt });
-    
-    // Reset states
-    setSelectedTransactions({});
-    setCustomAmounts({});
-    setDiscounts({});
-    setPartialPaymentAmount(0);
-    setShowPartialPayment(false);
-    setSelectedStudentId(null);
-  };
-
-  const handlePartialPayment = (studentId: string, transactions: any[]) => {
-    const totalDebt = transactions.reduce((sum, tx) => sum + tx.amount, 0);
-    
-    if (partialPaymentAmount >= totalDebt) {
-      // Si el pago cubre toda la deuda, marcar como pagado
-      transactions.forEach(tx => {
-        dispatch({ type: 'UPDATE_TRANSACTION_STATUS', payload: { id: tx.id, status: 'Pagado' } });
-      });
-    } else {
-      // Pago parcial: crear nuevas transacciones por el saldo
-      transactions.forEach(tx => {
-        const proportionalPayment = (partialPaymentAmount * tx.amount) / totalDebt;
-        const remainingAmount = tx.amount - proportionalPayment;
-        
-        if (remainingAmount > 0) {
-          const newTransaction = {
-            id: `${tx.id}_partial_${Date.now()}`,
-            studentId: tx.studentId,
-            studentName: tx.studentName,
-            classId: tx.classId,
-            className: tx.className,
-            type: 'charge' as const,
-            amount: remainingAmount,
-            date: new Date(),
-            description: `${tx.description} - Saldo restante`,
-            status: 'Pendiente' as const
-          };
-          
-          dispatch({ type: 'ADD_TRANSACTION', payload: newTransaction });
-        }
-        
-        // Marcar la transacción original como pagada
-        dispatch({ type: 'UPDATE_TRANSACTION_STATUS', payload: { id: tx.id, status: 'Pagado' } });
-      });
+      const pct = Math.max(0, Math.min(val, 100));
+      setPercent(pct);
+      const amt = +(selected.total * (pct / 100)).toFixed(2);
+      setAmount(Math.max(0, Math.min(amt, selected.total)));
     }
   };
 
-  const exportToCSV = () => {
-    const headers = ['Alumno', 'Clase', 'Fecha', 'Monto', 'Estado'];
-    const csvContent = [
-      headers.join(','),
-      ...pendingTransactions.map(tx => [
-        `"${tx.studentName}"`,
-        `"${tx.className}"`,
-        new Date(tx.date).toLocaleDateString('es-AR'),
-        tx.amount,
-        tx.status
-      ].join(','))
-    ].join('\n');
+  const applyDiscount = () => {
+    if (!selected) return;
+    const payload = mode === 'amount'
+      ? { studentId: selected.studentId, mode: 'amount' as const, value: amount, note }
+      : { studentId: selected.studentId, mode: 'percent' as const, value: percent, note };
 
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-    const link = document.createElement('a');
-    link.href = URL.createObjectURL(blob);
-    link.download = `facturas_pendientes_${new Date().toISOString().split('T')[0]}.csv`;
-    link.click();
-  };
-
-  const handlePrint = () => {
-    const printContent = `
-      <html>
-        <head>
-          <title>Facturas Pendientes</title>
-          <style>
-            body { font-family: Arial, sans-serif; margin: 20px; }
-            h1 { color: #1f2937; border-bottom: 2px solid #e5e7eb; padding-bottom: 10px; }
-            table { width: 100%; border-collapse: collapse; margin-top: 20px; }
-            th, td { border: 1px solid #d1d5db; padding: 8px; text-align: left; }
-            th { background-color: #f3f4f6; font-weight: bold; }
-            .total { font-weight: bold; background-color: #fef3c7; }
-          </style>
-        </head>
-        <body>
-          <h1>Facturas Pendientes</h1>
-          <p><strong>Fecha de generación:</strong> ${new Date().toLocaleDateString('es-AR')}</p>
-          
-          <table>
-            <thead>
-              <tr>
-                <th>Alumno</th>
-                <th>Clase</th>
-                <th>Fecha</th>
-                <th>Monto</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${pendingTransactions.map(tx => `
-                <tr>
-                  <td>${tx.studentName}</td>
-                  <td>${tx.className}</td>
-                  <td>${new Date(tx.date).toLocaleDateString('es-AR')}</td>
-                  <td>${formatCurrency(tx.amount)}</td>
-                </tr>
-              `).join('')}
-            </tbody>
-            <tfoot>
-              <tr class="total">
-                <td colspan="3"><strong>Total General</strong></td>
-                <td><strong>${formatCurrency(pendingTransactions.reduce((sum, tx) => sum + tx.amount, 0))}</strong></td>
-              </tr>
-            </tfoot>
-          </table>
-        </body>
-      </html>
-    `;
-
-    const printWindow = window.open('', '_blank');
-    if (printWindow) {
-      printWindow.document.write(printContent);
-      printWindow.document.close();
-      printWindow.print();
-    }
+    dispatch({ type: 'APPLY_DISCOUNT', payload });
+    // Al aplicar, des-selecciono y limpio
+    setSelected(null);
+    setAmount(0);
+    setPercent(0);
+    setNote('');
   };
 
   return (
-    <div className="space-y-6">
-      <div className="flex justify-between items-center">
-        <h1 className="text-2xl font-bold text-gray-900">Facturas Pendientes</h1>
-        <div className="flex gap-3">
-          <button
-            onClick={exportToCSV}
-            className="bg-green-600 text-white px-4 py-2 rounded-md hover:bg-green-700 flex items-center gap-2"
-          >
-            <Download size={20} />
-            Exportar CSV
-          </button>
-          <button
-            onClick={handlePrint}
-            className="bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 flex items-center gap-2"
-          >
-            <FileText size={20} />
-            Imprimir
-          </button>
+    <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+      {/* Columna izquierda: listado de alumnos con saldo pendiente + buscador */}
+      <div className="lg:col-span-5 bg-white rounded-xl shadow-sm border p-4">
+        <h2 className="text-lg font-semibold text-gray-800 mb-3">Alumnos con saldo pendiente</h2>
+        <div className="relative mb-4">
+          <Search className="absolute left-3 top-2.5 text-gray-400" size={18} />
+          <input
+            type="text"
+            placeholder="Buscar alumno..."
+            className="w-full pl-9 pr-3 py-2 border rounded-md focus:ring-2 focus:ring-blue-500 focus:outline-none"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+          />
         </div>
+
+        <ul className="divide-y">
+          {sortedFiltered.length === 0 && (
+            <li className="py-6 text-gray-500 text-sm">No hay alumnos con saldo pendiente.</li>
+          )}
+          {sortedFiltered.map(s => (
+            <li key={s.studentId} className="py-3 flex items-center justify-between">
+              <div>
+                <p className="font-medium text-gray-800">{s.studentName}</p>
+                <p className="text-sm text-gray-500">Pendiente: {formatCurrency(s.total)}</p>
+              </div>
+              <button
+                onClick={() => handleSelect(s)}
+                className={`px-3 py-1.5 text-sm rounded-md border transition ${
+                  selected?.studentId === s.studentId
+                    ? 'bg-blue-600 text-white border-blue-600'
+                    : 'bg-white text-gray-700 hover:bg-gray-50 border-gray-300'
+                }`}
+              >
+                Seleccionar
+              </button>
+            </li>
+          ))}
+        </ul>
       </div>
 
-      {/* Resumen */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        <div className="bg-white rounded-lg shadow p-6">
-          <div className="flex items-center">
-            <div className="p-2 bg-red-100 rounded-lg">
-              <Receipt className="h-6 w-6 text-red-600" />
-            </div>
-            <div className="ml-4">
-              <p className="text-sm font-medium text-gray-600">Facturas Pendientes</p>
-              <p className="text-2xl font-semibold text-gray-900">{pendingTransactions.length}</p>
-            </div>
-          </div>
-        </div>
+      {/* Columna derecha: aplicar descuento sobre total */}
+      <div className="lg:col-span-7 bg-white rounded-xl shadow-sm border p-4">
+        <h2 className="text-lg font-semibold text-gray-800 mb-3">Aplicar descuento sobre total</h2>
 
-        <div className="bg-white rounded-lg shadow p-6">
-          <div className="flex items-center">
-            <div className="p-2 bg-yellow-100 rounded-lg">
-              <DollarSign className="h-6 w-6 text-yellow-600" />
+        {!selected ? (
+          <div className="text-gray-500 text-sm">Seleccioná un alumno de la lista para aplicar un descuento.</div>
+        ) : (
+          <>
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 mb-4">
+              <div>
+                <p className="text-gray-800 font-medium">{selected.studentName}</p>
+                <p className="text-sm text-gray-500">Total pendiente: {formatCurrency(selected.total)}</p>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  className={`flex items-center gap-1 px-3 py-1.5 text-sm rounded-md border ${mode === 'amount' ? 'bg-blue-50 border-blue-600 text-blue-700' : 'bg-white border-gray-300 text-gray-700'}`}
+                  onClick={() => setMode('amount')}
+                >
+                  <BadgeDollarSign size={16} /> $ Monto
+                </button>
+                <button
+                  className={`flex items-center gap-1 px-3 py-1.5 text-sm rounded-md border ${mode === 'percent' ? 'bg-blue-50 border-blue-600 text-blue-700' : 'bg-white border-gray-300 text-gray-700'}`}
+                  onClick={() => setMode('percent')}
+                >
+                  <Percent size={16} /> % Porcentaje
+                </button>
+              </div>
             </div>
-            <div className="ml-4">
-              <p className="text-sm font-medium text-gray-600">Total Pendiente</p>
-              <p className="text-2xl font-semibold text-gray-900">
-                {formatCurrency(pendingTransactions.reduce((sum, tx) => sum + tx.amount, 0))}
-              </p>
-            </div>
-          </div>
-        </div>
 
-        <div className="bg-white rounded-lg shadow p-6">
-          <div className="flex items-center">
-            <div className="p-2 bg-blue-100 rounded-lg">
-              <Calendar className="h-6 w-6 text-blue-600" />
-            </div>
-            <div className="ml-4">
-              <p className="text-sm font-medium text-gray-600">Alumnos con Deuda</p>
-              <p className="text-2xl font-semibold text-gray-900">{Object.keys(groupedByStudent).length}</p>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {Object.keys(groupedByStudent).length === 0 ? (
-        <div className="bg-white rounded-lg shadow p-8 text-center">
-          <Receipt className="mx-auto h-12 w-12 text-gray-400 mb-4" />
-          <p className="text-gray-600 text-lg">No hay facturas pendientes</p>
-          <p className="text-gray-500 text-sm">Todas las facturas han sido pagadas</p>
-        </div>
-      ) : (
-        <div className="space-y-4">
-          {Object.entries(groupedByStudent).map(([studentId, group]) => (
-            <div key={studentId} className="bg-white rounded-lg shadow p-6">
-              <div className="flex justify-between items-center">
-                <div>
-                  <h2 className="text-lg font-semibold">{group.studentName}</h2>
-                  <p className="text-sm text-gray-500">{group.transactions.length} clase(s)</p>
-                </div>
-                <div className="text-right">
-                  <p className="text-lg font-semibold text-blue-700">{formatCurrency(group.total)}</p>
-                  <button
-                    className="mt-2 px-3 py-1 bg-blue-600 text-white rounded hover:bg-blue-700 text-sm"
-                    onClick={() => setSelectedStudentId(studentId)}
-                  >
-                    Cobrar
-                  </button>
-                </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
+              <div>
+                <label className="block text-sm text-gray-600 mb-1">Descuento en $ (sobre total)</label>
+                <input
+                  type="number"
+                  min={0}
+                  step="0.01"
+                  className="w-full border rounded-md px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                  value={amount}
+                  onChange={(e) => handleSyncInputs('amount', parseFloat(e.target.value || '0'))}
+                />
+                <p className="mt-1 text-xs text-gray-500">Máx: {formatCurrency(selected.total)}</p>
               </div>
 
-              {selectedStudentId === studentId && (
-                <div className="mt-6 border-t pt-6 space-y-4">
-                  <h3 className="font-medium text-gray-900">Clases a cobrar:</h3>
-                  
-                  <div className="space-y-2 max-h-60 overflow-y-auto">
-                    {group.transactions.map(tx => (
-                      <div key={tx.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
-                        <div className="flex items-center gap-3">
-                          <input
-                            type="checkbox"
-                            checked={selectedTransactions[tx.id] !== false}
-                            onChange={() => handleTransactionToggle(tx.id)}
-                            className="h-4 w-4 text-blue-600 rounded"
-                          />
-                          <div>
-                            <p className="font-medium text-sm">{tx.className}</p>
-                            <p className="text-xs text-gray-500">
-                              {new Date(tx.date).toLocaleDateString('es-AR')}
-                            </p>
-                          </div>
-                        </div>
-                        <div className="flex flex-col items-end gap-1">
-                          <span className="font-medium text-green-600">
-                            {formatCurrency(getTransactionFinalAmount(tx.id, tx.amount))}
-                          </span>
-                          {selectedTransactions[tx.id] !== false && (
-                            <div className="flex gap-1 text-xs">
-                              <input
-                                type="number"
-                                placeholder="Monto custom"
-                                value={customAmounts[tx.id] || ''}
-                                onChange={(e) => handleCustomAmountChange(tx.id, parseFloat(e.target.value) || 0)}
-                                className="w-20 px-1 py-0.5 border rounded text-xs"
-                              />
-                              <input
-                                type="number"
-                                placeholder="Descuento"
-                                value={discounts[tx.id] || ''}
-                                onChange={(e) => handleDiscountChange(tx.id, parseFloat(e.target.value) || 0)}
-                                className="w-20 px-1 py-0.5 border rounded text-xs"
-                              />
-                            </div>
-                          )}
-                          {tx.amount !== getTransactionFinalAmount(tx.id, tx.amount) && (
-                            <span className="text-xs text-gray-500 line-through">
-                              {formatCurrency(tx.amount)}
-                            </span>
-                          )}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                  
-                  <div className="border-t pt-3">
-                    <div className="space-y-3">
-                      <div className="flex items-center gap-2">
-                        <input
-                          type="checkbox"
-                          checked={showPartialPayment}
-                          onChange={(e) => setShowPartialPayment(e.target.checked)}
-                          className="h-4 w-4 text-blue-600 rounded"
-                        />
-                        <label className="text-sm font-medium">Pago parcial</label>
-                      </div>
-                      
-                      {showPartialPayment && (
-                        <div className="bg-yellow-50 p-3 rounded-lg">
-                          <label className="block text-sm font-medium mb-1">Monto del pago parcial:</label>
-                          <input
-                            type="number"
-                            value={partialPaymentAmount}
-                            onChange={(e) => setPartialPaymentAmount(parseFloat(e.target.value) || 0)}
-                            className="w-full px-3 py-2 border border-yellow-300 rounded-md"
-                            placeholder="Ingrese el monto que paga el alumno"
-                          />
-                        </div>
-                      )}
-                      
-                      <div className="flex justify-between items-center">
-                        <span className="font-medium">Total a cobrar:</span>
-                        <span className="text-lg font-bold text-green-600">
-                          {showPartialPayment 
-                            ? formatCurrency(partialPaymentAmount)
-                            : formatCurrency(
-                                group.transactions
-                                  .filter(tx => selectedTransactions[tx.id] !== false)
-                                  .reduce((sum, tx) => sum + getTransactionFinalAmount(tx.id, tx.amount), 0)
-                              )
-                          }
-                        </span>
-                      </div>
-                      
-                      {!showPartialPayment && (
-                        <div className="text-xs text-gray-500">
-                          Total original: {formatCurrency(
-                            group.transactions
-                              .filter(tx => selectedTransactions[tx.id] !== false)
-                              .reduce((sum, tx) => sum + tx.amount, 0)
-                          )}
-                        </div>
-                      )}
-                    </div>
-                  </div>
-
-                  <div className="space-y-1">
-                    <label className="block text-sm font-medium">Método de pago:</label>
-                    <select
-                      value={paymentMethod}
-                      onChange={(e) => setPaymentMethod(e.target.value as any)}
-                      className="w-full border border-gray-300 px-3 py-2 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    >
-                      <option value="cash">Efectivo</option>
-                      <option value="transfer">Transferencia</option>
-                      <option value="card">Tarjeta</option>
-                    </select>
-                  </div>
-
-                  <div className="flex gap-3">
-                    <button
-                      onClick={() => setSelectedStudentId(null)}
-                      className="flex-1 px-4 py-2 bg-gray-100 text-gray-700 rounded-md hover:bg-gray-200"
-                    >
-                      Cancelar
-                    </button>
-                    <button
-                      onClick={() => handlePay(studentId)}
-                      disabled={showPartialPayment && partialPaymentAmount <= 0}
-                      className="flex-1 flex items-center justify-center gap-2 px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed"
-                    >
-                      <CheckCircle size={18} />
-                      Confirmar Pago
-                    </button>
-                  </div>
-                </div>
-              )}
+              <div>
+                <label className="block text-sm text-gray-600 mb-1">Descuento en % (sobre total)</label>
+                <input
+                  type="number"
+                  min={0}
+                  max={100}
+                  step="0.01"
+                  className="w-full border rounded-md px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                  value={percent}
+                  onChange={(e) => handleSyncInputs('percent', parseFloat(e.target.value || '0'))}
+                />
+                <p className="mt-1 text-xs text-gray-500">0% a 100%</p>
+              </div>
             </div>
-          ))}
-        </div>
-      )}
+
+            <div className="mb-4">
+              <label className="block text-sm text-gray-600 mb-1">Nota (opcional)</label>
+              <input
+                type="text"
+                className="w-full border rounded-md px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                value={note}
+                onChange={(e) => setNote(e.target.value)}
+                placeholder="Motivo del descuento, ejemplo: fidelización, promo, etc."
+              />
+            </div>
+
+            <div className="flex items-center justify-between">
+              <div className="text-sm text-gray-600">
+                Nuevo saldo estimado:{' '}
+                <span className="font-semibold">
+                  {formatCurrency(Math.max(0, selected.total - (mode === 'amount' ? amount : +(selected.total * (percent / 100)).toFixed(2))))}
+                </span>
+              </div>
+              <button
+                onClick={applyDiscount}
+                disabled={(mode === 'amount' && amount <= 0) || (mode === 'percent' && percent <= 0)}
+                className="inline-flex items-center gap-2 px-4 py-2 rounded-md bg-green-600 text-white hover:bg-green-700 disabled:opacity-50"
+              >
+                <CheckCircle2 size={18} />
+                Aplicar descuento y saldar
+              </button>
+            </div>
+          </>
+        )}
+      </div>
     </div>
   );
 }

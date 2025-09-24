@@ -245,7 +245,7 @@ function appReducer(state: AppState, action: Action): AppState {
     case 'APPLY_DISCOUNT': {
       const { studentId, mode, value, note } = action.payload;
 
-      // Total pendiente del alumno por transacciones en estado "Pendiente"
+      // Transacciones pendientes del alumno
       const pendingTx = state.transactions.filter(t => t.studentId === studentId && t.status === 'Pendiente' && t.amount > 0);
       const totalPending = pendingTx.reduce((acc, t) => acc + t.amount, 0);
 
@@ -256,7 +256,7 @@ function appReducer(state: AppState, action: Action): AppState {
         totalPending
       );
 
-      // Marca todas como Pagado por "descuento" (no genera saldo pendiente)
+      // Marcar TODAS las pendientes como Pagado por descuento (se saldan)
       const updatedTransactions = state.transactions.map(t => {
         if (t.studentId === studentId && t.status === 'Pendiente' && discountAmount > 0) {
           return { ...t, status: 'Pagado', settlementKind: 'discount', description: `${t.description} (Descuento)` };
@@ -264,21 +264,7 @@ function appReducer(state: AppState, action: Action): AppState {
         return t;
       });
 
-      // Crea un asiento de "pago/ajuste" tipo descuento para auditoría (monto negativo en historial)
-      const discountTransaction: Transaction = {
-        id: `discount_${studentId}_${Date.now()}`,
-        studentId,
-        studentName: state.students.find(s => s.id === studentId)?.name || '',
-        className: 'Descuento sobre total',
-        type: 'payment',
-        amount: 0, // No suma pagos, solo marca como saldados por descuento
-        date: new Date(),
-        description: `Descuento aplicado: ${mode === 'amount' ? `-$${discountAmount.toFixed(2)}` : `-${value}%`} sobre total`,
-        status: 'Pagado',
-        settlementKind: 'discount'
-      };
-
-      // Actualiza saldo del alumno (resta el descuento)
+      // Asiento en historial del alumno (negativo)
       const updatedStudents = state.students.map(st => {
         if (st.id !== studentId) return st;
         const entry: AccountEntry = {
@@ -286,7 +272,7 @@ function appReducer(state: AppState, action: Action): AppState {
           date: new Date(),
           className: 'Descuento sobre total',
           classId: 'descuento-total',
-          attendanceStatus: 'Presente', // neutro para compatibilidad
+          attendanceStatus: 'Presente', // neutro
           amount: -discountAmount,
           createdAt: new Date(),
           kind: 'discount',
@@ -299,14 +285,36 @@ function appReducer(state: AppState, action: Action): AppState {
         };
       });
 
+      // *** NUEVO: Generar RECIBO por el descuento aplicado ***
+      const student = state.students.find(s => s.id === studentId);
+      const discountReceipt: Receipt = {
+        id: `rcpt_discount_${studentId}_${Date.now()}`,
+        studentId,
+        studentName: student?.name || '',
+        date: new Date(),
+        transactions: [
+          {
+            id: `disc_item_${studentId}_${Date.now()}`,
+            className: note && note.trim() ? `Descuento: ${note.trim()}` : 'Descuento aplicado sobre total',
+            date: new Date(),
+            // monto negativo para reflejar el descuento
+            amount: -discountAmount
+          }
+        ],
+        // total negativo para claridad (descontado)
+        totalAmount: -discountAmount
+      };
+
       newState = {
         ...state,
         students: updatedStudents,
-        transactions: [...updatedTransactions, discountTransaction]
+        transactions: updatedTransactions,
+        receipts: [...state.receipts, discountReceipt]
       };
 
       saveToStorage(STORAGE_KEYS.STUDENTS, newState.students);
       saveToStorage(STORAGE_KEYS.TRANSACTIONS, newState.transactions);
+      saveToStorage('receipts', newState.receipts);
       return newState;
     }
 

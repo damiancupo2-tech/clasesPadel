@@ -12,14 +12,18 @@ export interface Student {
   accountHistory: AccountEntry[];
 }
 
+export type AccountEntryKind = 'class' | 'discount';
+
 export interface AccountEntry {
   id: string;
   date: Date;
   className: string;
   classId: string;
   attendanceStatus: 'Presente' | 'Ausente';
-  amount: number;
+  amount: number;               // Para descuentos será negativo
   createdAt: Date;
+  kind?: AccountEntryKind;      // 'discount' para descuentos sobre total
+  note?: string;                // Observación opcional del descuento
 }
 
 export interface Class {
@@ -82,9 +86,9 @@ export interface Transaction {
   description: string;
   status: 'Pendiente' | 'Pagado';
   invoiceId?: string;
+  settlementKind?: 'payment' | 'discount'; // marca cómo se saldó si pasa a Pagado
 }
 
-// ✅ NUEVO: Recibo generado al cobrar múltiples transacciones
 export interface Receipt {
   id: string;
   studentId: string;
@@ -111,6 +115,6 @@ export interface AppState {
   payments: Payment[];
   invoices: Invoice[];
   transactions: Transaction[];
-  receipts: Receipt[]; // ✅ NUEVO: historial de recibos
+  receipts: Receipt[];
   currentUser: User;
 }

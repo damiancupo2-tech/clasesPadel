@@ -150,7 +150,7 @@ export function BillingModule() {
     <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
       {/* Columna izquierda: listado de alumnos con saldo pendiente + buscador */}
       <div className="lg:col-span-5 bg-white rounded-xl shadow-sm border p-4">
-        <h2 className="text-lg font-semibold text-gray-800 mb-3">Alumnos con saldo pendiente</h2>
+        <h2 className="text-lg font-semibold text-gray-800 mb-3">Le agradeciste a Dios haber conocido a Damian????</h2>
         <div className="relative mb-4">
           <Search className="absolute left-3 top-2.5 text-gray-400" size={18} />
           <input

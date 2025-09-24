@@ -8,30 +8,54 @@ export function ReceiptsHistory() {
   const [query, setQuery] = useState('');
   const [previewId, setPreviewId] = useState<string | null>(null);
 
-  const safeString = (v: any) => (typeof v === 'string' ? v : v?.toString?.() ?? '');
-  const norm = (v: any) => safeString(v).toLowerCase();
+  const S = (v: any) => (typeof v === 'string' ? v : v?.toString?.() ?? '');
+  const norm = (v: any) => S(v).toLowerCase();
 
   const filtered = useMemo(() => {
     const q = norm(query);
     return (state.receipts ?? [])
       .filter(r => norm(r?.studentName).includes(q))
       .sort((a, b) =>
-        // fecha desc, luego nombre asc
         new Date(b?.date ?? 0).getTime() - new Date(a?.date ?? 0).getTime() ||
-        safeString(a?.studentName).localeCompare(safeString(b?.studentName), 'es', { sensitivity: 'base' })
+        S(a?.studentName).localeCompare(S(b?.studentName), 'es', { sensitivity: 'base' })
       );
   }, [state.receipts, query]);
 
-  const rows = filtered.map(r => ({
-    id: r?.id,
-    fecha: new Date(r?.date ?? 0).toISOString().slice(0, 10),
-    alumno: safeString(r?.studentName),
-    cantidadItems: Array.isArray(r?.transactions) ? r.transactions.length : 0,
-    total: Number(r?.totalAmount ?? 0)
-  }));
+  /** Mapea un recibo a los campos que pediste en la grilla */
+  const mapToRow = (r: any) => {
+    const subTotal = Number(r?.totalAmount ?? 0);
+    const discountExplicit = Number(r?.discountAmount ?? 0);
+    const paidMaybe = r?.paidAmount != null ? Number(r.paidAmount) : undefined;
+    // Si el recibo no trae discountAmount, lo derivamos desde paidAmount
+    const discountDerived = paidMaybe != null ? Math.max(0, subTotal - paidMaybe) : 0;
+    const discount = discountExplicit > 0 ? discountExplicit : discountDerived;
+    const saldoTotal = Math.max(0, subTotal - discount);
+    const itemCount = Array.isArray(r?.transactions) ? r.transactions.length : 0;
+    return {
+      id: r?.id,
+      fecha: new Date(r?.date ?? 0).toISOString().slice(0, 10),
+      alumno: S(r?.studentName),
+      item: itemCount,          // cantidad de items
+      subTotal,
+      descuento: discount,
+      saldoTotal
+    };
+  };
 
-  const handleExportJSON = () => exportJSON('recibos', rows);
-  const handleExportCSV = () => exportCSV('recibos', rows);
+  const rows = filtered.map(mapToRow);
+
+  const handleExportJSON = () =>
+    exportJSON('recibos', rows);
+
+  const handleExportCSV = () =>
+    exportCSV('recibos', rows.map(r => ({
+      fecha: r.fecha,
+      alumno: r.alumno,
+      item: r.item,
+      'sub-total': r.subTotal,
+      descuento: r.descuento,
+      'saldo total (sub total - descuento)': r.saldoTotal
+    })));
 
   const receiptById = (id: string | null) =>
     (state.receipts ?? []).find(r => String(r.id) === String(id)) || null;
@@ -40,24 +64,29 @@ export function ReceiptsHistory() {
     const r = receiptById(receiptId);
     if (!r) return;
 
+    const subTotal = Number(r?.totalAmount ?? 0);
+    const discountExplicit = Number(r?.discountAmount ?? 0);
+    const paidMaybe = r?.paidAmount != null ? Number(r.paidAmount) : undefined;
+    const discountDerived = paidMaybe != null ? Math.max(0, subTotal - paidMaybe) : 0;
+    const discount = discountExplicit > 0 ? discountExplicit : discountDerived;
+    const saldoTotal = Math.max(0, subTotal - discount);
+
     const dateStr = new Date(r.date).toLocaleString('es-AR');
     const itemsHtml = (r.transactions || [])
-      .map(it => `
+      .map((it: any) => `
         <tr>
-          <td style="padding:6px;border-bottom:1px solid #eee;">${safeString(it.className)}</td>
+          <td style="padding:6px;border-bottom:1px solid #eee;">${S(it.className)}</td>
           <td style="padding:6px;border-bottom:1px solid #eee;">${new Date(it.date).toISOString().slice(0,10)}</td>
           <td style="padding:6px;border-bottom:1px solid #eee;text-align:right;">${formatCurrency(Number(it.amount||0))}</td>
         </tr>
       `).join('');
-
-    const totalHtml = formatCurrency(Number(r.totalAmount || 0));
 
     const html = `
 <!doctype html>
 <html>
 <head>
   <meta charset="utf-8"/>
-  <title>Recibo ${r.id}</title>
+  <title>Recibo ${S(r.id)}</title>
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
   <style>
     body{font-family:ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,Cantarell,"Helvetica Neue",Arial,"Noto Sans",sans-serif;padding:24px;color:#111}
@@ -68,9 +97,7 @@ export function ReceiptsHistory() {
     table{width:100%;border-collapse:collapse;font-size:14px;margin-top:10px}
     .tot{font-weight:700}
     .foot{margin-top:16px;font-size:12px;color:#6b7280}
-    @media print {
-      .noprint{display:none}
-    }
+    @media print { .noprint{display:none} }
   </style>
 </head>
 <body>
@@ -78,10 +105,10 @@ export function ReceiptsHistory() {
     <div class="header">
       <div>
         <div class="title">Recibo</div>
-        <div class="meta">ID: ${r.id}</div>
+        <div class="meta">ID: ${S(r.id)}</div>
       </div>
       <div class="meta" style="text-align:right">
-        <div>Alumno: ${safeString(r.studentName)}</div>
+        <div>Alumno: ${S(r.studentName)}</div>
         <div>Fecha: ${dateStr}</div>
       </div>
     </div>
@@ -99,8 +126,16 @@ export function ReceiptsHistory() {
       </tbody>
       <tfoot>
         <tr>
-          <td colspan="2" style="padding:8px;text-align:right" class="tot">Total</td>
-          <td style="padding:8px;text-align:right" class="tot">${totalHtml}</td>
+          <td colspan="2" style="padding:8px;text-align:right" class="tot">Sub-total</td>
+          <td style="padding:8px;text-align:right" class="tot">${formatCurrency(subTotal)}</td>
+        </tr>
+        <tr>
+          <td colspan="2" style="padding:8px;text-align:right">Descuento</td>
+          <td style="padding:8px;text-align:right">${formatCurrency(discount)}</td>
+        </tr>
+        <tr>
+          <td colspan="2" style="padding:8px;text-align:right" class="tot">Saldo total (sub total - descuento)</td>
+          <td style="padding:8px;text-align:right" class="tot">${formatCurrency(saldoTotal)}</td>
         </tr>
       </tfoot>
     </table>
@@ -154,29 +189,33 @@ export function ReceiptsHistory() {
             <tr className="text-left text-gray-600">
               <th className="py-2">Fecha</th>
               <th className="py-2">Alumno</th>
-              <th className="py-2">Items</th>
-              <th className="py-2">Total</th>
+              <th className="py-2">Item</th>
+              <th className="py-2">Sub-total</th>
+              <th className="py-2">Descuento</th>
+              <th className="py-2">Saldo total (sub total - descuento)</th>
               <th className="py-2">Acciones</th>
             </tr>
           </thead>
           <tbody>
-            {filtered.map(r => (
-              <tr key={String(r?.id)} className="border-t">
-                <td className="py-2">{new Date(r?.date ?? 0).toISOString().slice(0, 10)}</td>
-                <td className="py-2">{safeString(r?.studentName)}</td>
-                <td className="py-2">{Array.isArray(r?.transactions) ? r.transactions.length : 0}</td>
-                <td className="py-2">{formatCurrency(Number(r?.totalAmount ?? 0))}</td>
+            {rows.map(r => (
+              <tr key={String(r.id)} className="border-t">
+                <td className="py-2">{r.fecha}</td>
+                <td className="py-2">{r.alumno}</td>
+                <td className="py-2">{r.item}</td>
+                <td className="py-2">{formatCurrency(r.subTotal)}</td>
+                <td className="py-2">{formatCurrency(r.descuento)}</td>
+                <td className="py-2">{formatCurrency(r.saldoTotal)}</td>
                 <td className="py-2">
                   <div className="flex items-center gap-2">
                     <button
-                      onClick={() => setPreviewId(String(r?.id))}
+                      onClick={() => setPreviewId(String(r.id))}
                       className="inline-flex items-center gap-1 px-2 py-1 border rounded-md"
                       title="Previsualizar"
                     >
                       <Eye size={16} /> Ver
                     </button>
                     <button
-                      onClick={() => openPrintWindow(String(r?.id))}
+                      onClick={() => openPrintWindow(String(r.id))}
                       className="inline-flex items-center gap-1 px-2 py-1 border rounded-md"
                       title="Imprimir"
                     >
@@ -186,19 +225,26 @@ export function ReceiptsHistory() {
                 </td>
               </tr>
             ))}
-            {filtered.length === 0 && (
+            {rows.length === 0 && (
               <tr>
-                <td colSpan={5} className="py-6 text-center text-gray-500">No hay recibos.</td>
+                <td colSpan={7} className="py-6 text-center text-gray-500">No hay recibos.</td>
               </tr>
             )}
           </tbody>
         </table>
       </div>
 
-      {/* Preview simple embebido (sin estilos pesados) */}
+      {/* Modal de previsualización con el mismo resumen (Sub-total / Descuento / Saldo total) */}
       {previewId && (() => {
         const r = receiptById(previewId);
         if (!r) return null;
+        const subTotal = Number(r?.totalAmount ?? 0);
+        const discountExplicit = Number(r?.discountAmount ?? 0);
+        const paidMaybe = r?.paidAmount != null ? Number(r.paidAmount) : undefined;
+        const discountDerived = paidMaybe != null ? Math.max(0, subTotal - paidMaybe) : 0;
+        const discount = discountExplicit > 0 ? discountExplicit : discountDerived;
+        const saldoTotal = Math.max(0, subTotal - discount);
+
         return (
           <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
             <div className="bg-white rounded-xl shadow-xl w-[95vw] max-w-3xl p-4">
@@ -213,11 +259,12 @@ export function ReceiptsHistory() {
                     <div className="text-xs text-gray-500">ID: {String(r.id)}</div>
                   </div>
                   <div className="text-right text-sm text-gray-600">
-                    <div>Alumno: {safeString(r.studentName)}</div>
+                    <div>Alumno: {S(r.studentName)}</div>
                     <div>Fecha: {new Date(r.date).toLocaleString('es-AR')}</div>
                   </div>
                 </div>
-                <table className="min-w-full text-sm">
+
+                <table className="min-w-full text-sm mb-2">
                   <thead>
                     <tr className="text-left text-gray-600">
                       <th className="py-1">Detalle</th>
@@ -226,9 +273,9 @@ export function ReceiptsHistory() {
                     </tr>
                   </thead>
                   <tbody>
-                    {(r.transactions || []).map(it => (
+                    {(r.transactions || []).map((it: any) => (
                       <tr key={String(it.id)} className="border-t">
-                        <td className="py-1">{safeString(it.className)}</td>
+                        <td className="py-1">{S(it.className)}</td>
                         <td className="py-1">{new Date(it.date).toISOString().slice(0,10)}</td>
                         <td className="py-1 text-right">{formatCurrency(Number(it.amount || 0))}</td>
                       </tr>
@@ -239,14 +286,28 @@ export function ReceiptsHistory() {
                       </tr>
                     )}
                   </tbody>
-                  <tfoot>
-                    <tr className="border-t">
-                      <td colSpan={2} className="py-2 text-right font-semibold">Total</td>
-                      <td className="py-2 text-right font-semibold">{formatCurrency(Number(r.totalAmount || 0))}</td>
-                    </tr>
-                  </tfoot>
                 </table>
+
+                <div className="mt-2">
+                  <div className="flex justify-end text-sm">
+                    <div className="w-full max-w-sm space-y-1">
+                      <div className="flex justify-between">
+                        <span className="text-gray-600">Sub-total</span>
+                        <span className="font-semibold">{formatCurrency(subTotal)}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-gray-600">Descuento</span>
+                        <span>{formatCurrency(discount)}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-gray-600 font-semibold">Saldo total (sub total - descuento)</span>
+                        <span className="font-semibold">{formatCurrency(saldoTotal)}</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
               </div>
+
               <div className="mt-3 flex items-center justify-end gap-2">
                 <button
                   onClick={() => openPrintWindow(String(r.id))}

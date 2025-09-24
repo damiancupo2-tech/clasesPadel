@@ -7,17 +7,25 @@ export function ReceiptsHistory() {
   const { state } = useApp();
   const [query, setQuery] = useState('');
 
+  const safeString = (v: any) => (typeof v === 'string' ? v : v?.toString?.() ?? '');
+  const norm = (v: any) => safeString(v).toLowerCase();
+
   const filtered = useMemo(() => {
-    return state.receipts
-      .filter(r => r.studentName.toLowerCase().includes(query.toLowerCase()))
-      .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+    const q = norm(query);
+    return (state.receipts ?? [])
+      .filter(r => norm(r?.studentName).includes(q))
+      .sort((a, b) =>
+        // primero por fecha desc, luego por nombre asc
+        new Date(b?.date ?? 0).getTime() - new Date(a?.date ?? 0).getTime() ||
+        safeString(a?.studentName).localeCompare(safeString(b?.studentName), 'es', { sensitivity: 'base' })
+      );
   }, [state.receipts, query]);
 
   const rows = filtered.map(r => ({
-    fecha: new Date(r.date).toISOString().slice(0, 10),
-    alumno: r.studentName,
-    cantidadItems: r.transactions.length,
-    total: r.totalAmount
+    fecha: new Date(r?.date ?? 0).toISOString().slice(0, 10),
+    alumno: safeString(r?.studentName),
+    cantidadItems: Array.isArray(r?.transactions) ? r.transactions.length : 0,
+    total: Number(r?.totalAmount ?? 0)
   }));
 
   const handleExportJSON = () => exportJSON('recibos', rows);
@@ -59,11 +67,11 @@ export function ReceiptsHistory() {
           </thead>
           <tbody>
             {filtered.map(r => (
-              <tr key={r.id} className="border-t">
-                <td className="py-2">{new Date(r.date).toISOString().slice(0, 10)}</td>
-                <td className="py-2">{r.studentName}</td>
-                <td className="py-2">{r.transactions.length}</td>
-                <td className="py-2">{formatCurrency(r.totalAmount)}</td>
+              <tr key={String(r?.id)} className="border-t">
+                <td className="py-2">{new Date(r?.date ?? 0).toISOString().slice(0, 10)}</td>
+                <td className="py-2">{safeString(r?.studentName)}</td>
+                <td className="py-2">{Array.isArray(r?.transactions) ? r.transactions.length : 0}</td>
+                <td className="py-2">{formatCurrency(Number(r?.totalAmount ?? 0))}</td>
               </tr>
             ))}
             {filtered.length === 0 && (

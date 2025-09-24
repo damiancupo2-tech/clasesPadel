@@ -255,16 +255,17 @@ function appReducer(state: AppState, action: Action): AppState {
         mode === 'amount' ? value : (totalPending * (value / 100)),
         totalPending
       );
+      const paidAmount = +(totalPending - discountAmount).toFixed(2);
 
-      // Marcar TODAS las pendientes como Pagado por descuento (se saldan)
+      // Marcar todas las pendientes como Pagado (indicamos que se saldan con descuento+pago)
       const updatedTransactions = state.transactions.map(t => {
-        if (t.studentId === studentId && t.status === 'Pendiente' && discountAmount > 0) {
-          return { ...t, status: 'Pagado', settlementKind: 'discount', description: `${t.description} (Descuento)` };
+        if (t.studentId === studentId && t.status === 'Pendiente') {
+          return { ...t, status: 'Pagado', description: `${t.description} (Saldada)` };
         }
         return t;
       });
 
-      // Asiento en historial del alumno (negativo)
+      // Asiento en historial del alumno (negativo por el descuento)
       const updatedStudents = state.students.map(st => {
         if (st.id !== studentId) return st;
         const entry: AccountEntry = {
@@ -272,7 +273,7 @@ function appReducer(state: AppState, action: Action): AppState {
           date: new Date(),
           className: 'Descuento sobre total',
           classId: 'descuento-total',
-          attendanceStatus: 'Presente', // neutro
+          attendanceStatus: 'Presente',
           amount: -discountAmount,
           createdAt: new Date(),
           kind: 'discount',
@@ -285,24 +286,22 @@ function appReducer(state: AppState, action: Action): AppState {
         };
       });
 
-      // *** NUEVO: Generar RECIBO por el descuento aplicado ***
+      // *** Recibo completo con detalle, saldo total, descuento y pagado ***
       const student = state.students.find(s => s.id === studentId);
       const discountReceipt: Receipt = {
         id: `rcpt_discount_${studentId}_${Date.now()}`,
         studentId,
         studentName: student?.name || '',
         date: new Date(),
-        transactions: [
-          {
-            id: `disc_item_${studentId}_${Date.now()}`,
-            className: note && note.trim() ? `Descuento: ${note.trim()}` : 'Descuento aplicado sobre total',
-            date: new Date(),
-            // monto negativo para reflejar el descuento
-            amount: -discountAmount
-          }
-        ],
-        // total negativo para claridad (descontado)
-        totalAmount: -discountAmount
+        transactions: pendingTx.map(t => ({
+          id: t.id,
+          className: t.className,
+          date: new Date(t.date),
+          amount: t.amount // positivo (cargo)
+        })),
+        totalAmount: totalPending,       // saldo total
+        discountAmount: discountAmount,  // descuento aplicado
+        paidAmount: paidAmount           // monto abonado (total - descuento)
       };
 
       newState = {

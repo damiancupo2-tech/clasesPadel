@@ -21,31 +21,37 @@ export function ReceiptsHistory() {
       );
   }, [state.receipts, query]);
 
-  /** Mapea un recibo a los campos que pediste en la grilla */
+  /** Normaliza un recibo a las columnas pedidas */
   const mapToRow = (r: any) => {
     const subTotal = Number(r?.totalAmount ?? 0);
     const discountExplicit = Number(r?.discountAmount ?? 0);
     const paidMaybe = r?.paidAmount != null ? Number(r.paidAmount) : undefined;
-    // Si el recibo no trae discountAmount, lo derivamos desde paidAmount
+
+    // si no viene discountAmount, lo derivamos desde paidAmount
     const discountDerived = paidMaybe != null ? Math.max(0, subTotal - paidMaybe) : 0;
-    const discount = discountExplicit > 0 ? discountExplicit : discountDerived;
-    const saldoTotal = Math.max(0, subTotal - discount);
+    const descuento = discountExplicit > 0 ? discountExplicit : discountDerived;
+
+    const saldoTotal = Math.max(0, subTotal - descuento);
+    // abonado: lo que efectivamente pagó; si no hay paidAmount, asumimos que abonó el saldo total
+    const abonado = paidMaybe != null ? Math.min(paidMaybe, saldoTotal) : saldoTotal;
+
     const itemCount = Array.isArray(r?.transactions) ? r.transactions.length : 0;
+
     return {
       id: r?.id,
       fecha: new Date(r?.date ?? 0).toISOString().slice(0, 10),
       alumno: S(r?.studentName),
-      item: itemCount,          // cantidad de items
+      item: itemCount,
       subTotal,
-      descuento: discount,
-      saldoTotal
+      descuento,
+      saldoTotal,
+      abonado
     };
   };
 
   const rows = filtered.map(mapToRow);
 
-  const handleExportJSON = () =>
-    exportJSON('recibos', rows);
+  const handleExportJSON = () => exportJSON('recibos', rows);
 
   const handleExportCSV = () =>
     exportCSV('recibos', rows.map(r => ({
@@ -54,7 +60,8 @@ export function ReceiptsHistory() {
       item: r.item,
       'sub-total': r.subTotal,
       descuento: r.descuento,
-      'saldo total (sub total - descuento)': r.saldoTotal
+      'saldo total (sub total - descuento)': r.saldoTotal,
+      'monto abonado': r.abonado
     })));
 
   const receiptById = (id: string | null) =>
@@ -68,8 +75,9 @@ export function ReceiptsHistory() {
     const discountExplicit = Number(r?.discountAmount ?? 0);
     const paidMaybe = r?.paidAmount != null ? Number(r.paidAmount) : undefined;
     const discountDerived = paidMaybe != null ? Math.max(0, subTotal - paidMaybe) : 0;
-    const discount = discountExplicit > 0 ? discountExplicit : discountDerived;
-    const saldoTotal = Math.max(0, subTotal - discount);
+    const descuento = discountExplicit > 0 ? discountExplicit : discountDerived;
+    const saldoTotal = Math.max(0, subTotal - descuento);
+    const abonado = paidMaybe != null ? Math.min(paidMaybe, saldoTotal) : saldoTotal;
 
     const dateStr = new Date(r.date).toLocaleString('es-AR');
     const itemsHtml = (r.transactions || [])
@@ -131,11 +139,15 @@ export function ReceiptsHistory() {
         </tr>
         <tr>
           <td colspan="2" style="padding:8px;text-align:right">Descuento</td>
-          <td style="padding:8px;text-align:right">${formatCurrency(discount)}</td>
+          <td style="padding:8px;text-align:right">${formatCurrency(descuento)}</td>
         </tr>
         <tr>
           <td colspan="2" style="padding:8px;text-align:right" class="tot">Saldo total (sub total - descuento)</td>
           <td style="padding:8px;text-align:right" class="tot">${formatCurrency(saldoTotal)}</td>
+        </tr>
+        <tr>
+          <td colspan="2" style="padding:8px;text-align:right">Monto abonado</td>
+          <td style="padding:8px;text-align:right">${formatCurrency(abonado)}</td>
         </tr>
       </tfoot>
     </table>
@@ -193,6 +205,7 @@ export function ReceiptsHistory() {
               <th className="py-2">Sub-total</th>
               <th className="py-2">Descuento</th>
               <th className="py-2">Saldo total (sub total - descuento)</th>
+              <th className="py-2">Monto abonado</th>
               <th className="py-2">Acciones</th>
             </tr>
           </thead>
@@ -205,6 +218,7 @@ export function ReceiptsHistory() {
                 <td className="py-2">{formatCurrency(r.subTotal)}</td>
                 <td className="py-2">{formatCurrency(r.descuento)}</td>
                 <td className="py-2">{formatCurrency(r.saldoTotal)}</td>
+                <td className="py-2">{formatCurrency(r.abonado)}</td>
                 <td className="py-2">
                   <div className="flex items-center gap-2">
                     <button
@@ -227,14 +241,14 @@ export function ReceiptsHistory() {
             ))}
             {rows.length === 0 && (
               <tr>
-                <td colSpan={7} className="py-6 text-center text-gray-500">No hay recibos.</td>
+                <td colSpan={8} className="py-6 text-center text-gray-500">No hay recibos.</td>
               </tr>
             )}
           </tbody>
         </table>
       </div>
 
-      {/* Modal de previsualización con el mismo resumen (Sub-total / Descuento / Saldo total) */}
+      {/* Modal de previsualización con el nuevo campo "Monto abonado" */}
       {previewId && (() => {
         const r = receiptById(previewId);
         if (!r) return null;
@@ -242,8 +256,9 @@ export function ReceiptsHistory() {
         const discountExplicit = Number(r?.discountAmount ?? 0);
         const paidMaybe = r?.paidAmount != null ? Number(r.paidAmount) : undefined;
         const discountDerived = paidMaybe != null ? Math.max(0, subTotal - paidMaybe) : 0;
-        const discount = discountExplicit > 0 ? discountExplicit : discountDerived;
-        const saldoTotal = Math.max(0, subTotal - discount);
+        const descuento = discountExplicit > 0 ? discountExplicit : discountDerived;
+        const saldoTotal = Math.max(0, subTotal - descuento);
+        const abonado = paidMaybe != null ? Math.min(paidMaybe, saldoTotal) : saldoTotal;
 
         return (
           <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
@@ -297,11 +312,15 @@ export function ReceiptsHistory() {
                       </div>
                       <div className="flex justify-between">
                         <span className="text-gray-600">Descuento</span>
-                        <span>{formatCurrency(discount)}</span>
+                        <span>{formatCurrency(descuento)}</span>
                       </div>
                       <div className="flex justify-between">
-                        <span className="text-gray-600 font-semibold">Saldo total (sub total - descuento)</span>
+                        <span className="text-gray-600">Saldo total (sub total - descuento)</span>
                         <span className="font-semibold">{formatCurrency(saldoTotal)}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-gray-600">Monto abonado</span>
+                        <span className="font-semibold">{formatCurrency(abonado)}</span>
                       </div>
                     </div>
                   </div>

@@ -1,25 +1,62 @@
 import React, { useMemo, useState } from 'react';
-import { Download, Search, Eye, Printer } from 'lucide-react';
+import { Download, Search, Eye, Printer, X } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { exportCSV, exportJSON, formatCurrency } from '../utils/format';
 
 export function ReceiptsHistory() {
   const { state } = useApp();
-  const [query, setQuery] = useState('');
+
+  // ── Filtros ──────────────────────────────────────────────────────────────────
+  const [query, setQuery] = useState('');               // búsqueda libre por nombre
+  const [studentId, setStudentId] = useState<string>(''); // filtro exacto por alumno
+  const [dateFrom, setDateFrom] = useState<string>(''); // YYYY-MM-DD
+  const [dateTo, setDateTo] = useState<string>('');
+
+  // Para preview/print
   const [previewId, setPreviewId] = useState<string | null>(null);
 
   const S = (v: any) => (typeof v === 'string' ? v : v?.toString?.() ?? '');
   const norm = (v: any) => S(v).toLowerCase();
 
-  const filtered = useMemo(() => {
+  const studentsOptions = useMemo(() => {
+    const uniq = new Map<string, string>();
+    (state.students || []).forEach(s => uniq.set(s.id, s.name));
+    return Array.from(uniq.entries())
+      .map(([id, name]) => ({ id, name }))
+      .sort((a, b) => a.name.localeCompare(b.name, 'es', { sensitivity: 'base' }));
+  }, [state.students]);
+
+  const inDateRange = (d: Date) => {
+    const ts = d.getTime();
+    if (dateFrom) {
+      const from = new Date(`${dateFrom}T00:00:00`);
+      if (ts < from.getTime()) return false;
+    }
+    if (dateTo) {
+      const to = new Date(`${dateTo}T23:59:59.999`);
+      if (ts > to.getTime()) return false;
+    }
+    return true;
+  };
+
+  const filteredReceipts = useMemo(() => {
     const q = norm(query);
     return (state.receipts ?? [])
-      .filter(r => norm(r?.studentName).includes(q))
+      .filter(r => {
+        // filtro por alumno (exacto)
+        if (studentId && r.studentId !== studentId) return false;
+        // búsqueda libre por nombre
+        if (q && !norm(r?.studentName).includes(q)) return false;
+        // filtro por fechas
+        const dt = new Date(r?.date ?? 0);
+        if (!inDateRange(dt)) return false;
+        return true;
+      })
       .sort((a, b) =>
         new Date(b?.date ?? 0).getTime() - new Date(a?.date ?? 0).getTime() ||
         S(a?.studentName).localeCompare(S(b?.studentName), 'es', { sensitivity: 'base' })
       );
-  }, [state.receipts, query]);
+  }, [state.receipts, query, studentId, dateFrom, dateTo]);
 
   /** Normaliza un recibo a las columnas pedidas */
   const mapToRow = (r: any) => {
@@ -49,12 +86,12 @@ export function ReceiptsHistory() {
     };
   };
 
-  const rows = filtered.map(mapToRow);
+  const rows = filteredReceipts.map(mapToRow);
 
-  const handleExportJSON = () => exportJSON('recibos', rows);
+  const handleExportJSON = () => exportJSON('recibos_filtrados', rows);
 
   const handleExportCSV = () =>
-    exportCSV('recibos', rows.map(r => ({
+    exportCSV('recibos_filtrados', rows.map(r => ({
       fecha: r.fecha,
       alumno: r.alumno,
       item: r.item,
@@ -63,6 +100,13 @@ export function ReceiptsHistory() {
       'saldo total (sub total - descuento)': r.saldoTotal,
       'monto abonado': r.abonado
     })));
+
+  const clearFilters = () => {
+    setQuery('');
+    setStudentId('');
+    setDateFrom('');
+    setDateTo('');
+  };
 
   const receiptById = (id: string | null) =>
     (state.receipts ?? []).find(r => String(r.id) === String(id)) || null;
@@ -173,18 +217,67 @@ export function ReceiptsHistory() {
 
   return (
     <div className="bg-white rounded-xl shadow-sm border p-4">
-      <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-3 mb-4">
-        <div className="relative">
-          <Search className="absolute left-3 top-2.5 text-gray-400" size={18} />
-          <input
-            type="text"
-            placeholder="Buscar por alumno..."
-            className="w-full sm:w-80 pl-9 pr-3 py-2 border rounded-md focus:ring-2 focus:ring-blue-500 focus:outline-none"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-          />
+      {/* Barra de filtros */}
+      <div className="flex flex-col lg:flex-row gap-3 lg:items-end lg:justify-between mb-4">
+        <div className="flex flex-col sm:flex-row gap-3 sm:items-end">
+          {/* Buscar por nombre */}
+          <div className="relative">
+            <Search className="absolute left-3 top-2.5 text-gray-400" size={18} />
+            <input
+              type="text"
+              placeholder="Buscar por alumno..."
+              className="w-full sm:w-64 pl-9 pr-3 py-2 border rounded-md focus:ring-2 focus:ring-blue-500 focus:outline-none"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+            />
+          </div>
+
+          {/* Filtro exacto por alumno */}
+          <div>
+            <label className="block text-xs text-gray-500 mb-1">Alumno</label>
+            <select
+              className="w-full sm:w-56 border rounded-md px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:outline-none"
+              value={studentId}
+              onChange={(e) => setStudentId(e.target.value)}
+            >
+              <option value="">Todos</option>
+              {studentsOptions.map(s => (
+                <option key={s.id} value={s.id}>{s.name}</option>
+              ))}
+            </select>
+          </div>
+
+          {/* Rango de fechas */}
+          <div>
+            <label className="block text-xs text-gray-500 mb-1">Desde</label>
+            <input
+              type="date"
+              className="border rounded-md px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:outline-none"
+              value={dateFrom}
+              onChange={(e) => setDateFrom(e.target.value)}
+            />
+          </div>
+          <div>
+            <label className="block text-xs text-gray-500 mb-1">Hasta</label>
+            <input
+              type="date"
+              className="border rounded-md px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:outline-none"
+              value={dateTo}
+              onChange={(e) => setDateTo(e.target.value)}
+            />
+          </div>
+
+          {/* Limpiar */}
+          <button
+            onClick={clearFilters}
+            className="inline-flex items-center gap-2 px-3 py-2 border rounded-md self-start"
+            title="Limpiar filtros"
+          >
+            <X size={16} /> Limpiar
+          </button>
         </div>
 
+        {/* Exportaciones respetan los filtros */}
         <div className="flex items-center gap-2">
           <button onClick={handleExportJSON} className="inline-flex items-center gap-2 px-3 py-2 border rounded-md">
             <Download size={16} /> Exportar JSON
@@ -195,6 +288,7 @@ export function ReceiptsHistory() {
         </div>
       </div>
 
+      {/* Tabla */}
       <div className="overflow-x-auto">
         <table className="min-w-full text-sm">
           <thead>
@@ -241,14 +335,14 @@ export function ReceiptsHistory() {
             ))}
             {rows.length === 0 && (
               <tr>
-                <td colSpan={8} className="py-6 text-center text-gray-500">No hay recibos.</td>
+                <td colSpan={8} className="py-6 text-center text-gray-500">No hay recibos con los filtros aplicados.</td>
               </tr>
             )}
           </tbody>
         </table>
       </div>
 
-      {/* Modal de previsualización con el nuevo campo "Monto abonado" */}
+      {/* Modal de previsualización */}
       {previewId && (() => {
         const r = receiptById(previewId);
         if (!r) return null;

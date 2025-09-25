@@ -22,9 +22,9 @@ function App() {
         return (
           <div className="text-center py-12">
             <h2 className="text-2xl font-bold text-gray-900 mb-4">Configuración</h2>
-            <p className="text-gray-600">Che Molina, aunque te cueste reconocerlo... es crack Cupo no?? aprovechalo, te esta enseñando gratis! si no le das bola algun dia te vas a arrepentir!!! ponete las pilas y labura que la que no ganas hoy, de viejo la vas a lamentar!!!
+            <p className="text-gray-600">Che Molina, aunque te cueste reconocerlo... es crack Cupo no?? aprovechalo, te esta enseñando gratis! si no le das bola algun dia te vas a arrepentir!!! ponete las pilas y labura que la que no ganas hoy, de viejo la vas a lamentar!!!                                                                                            
             
-            * Acordate que no sos el dueño de la verdad y el peor error que puede cometer un ser humano es no escuchar a otros y ponerse en terco, el que no escucha no aprende!!
+            * Acordate que no sos el dueño de la verdad y el peor error que puede cometer un ser humano es no escuchar a otros y ponerse en terco, el que no escucha no aprende!!                                                                                                                                                                                       
             
             * ya sos grande, deja de hacerte el pendejo y sacate ese aro de alumno de secundaria</p>
           </div>

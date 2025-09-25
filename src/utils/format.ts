@@ -6,44 +6,47 @@ export function formatCurrency(value: number): string {
   });
 }
 
-/** Descarga archivo como JSON */
-export function exportJSON(filename: string, data: any) {
-  const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json;charset=utf-8' });
+/** Descarga un archivo en el navegador */
+function downloadFile(filename: string, mime: string, data: BlobPart) {
+  const blob = new Blob([data], { type: mime });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = filename.endsWith('.json') ? filename : `${filename}.json`;
+  a.download = filename;
+  document.body.appendChild(a);
   a.click();
+  a.remove();
   URL.revokeObjectURL(url);
 }
 
-/** Convierte array de objetos a CSV plano (con encabezados) y descarga */
-export function exportCSV(filename: string, rows: Record<string, any>[]) {
+export function exportJSON(baseName: string, rows: any[]) {
+  const name = `${baseName}_${new Date().toISOString().slice(0, 10)}.json`;
+  const json = JSON.stringify(rows, null, 2);
+  // BOM para evitar problemas de encoding
+  const bom = '\ufeff';
+  downloadFile(name, 'application/json;charset=utf-8', bom + json);
+}
+
+export function exportCSV(baseName: string, rows: any[]) {
+  const name = `${baseName}_${new Date().toISOString().slice(0, 10)}.csv`;
   if (!rows || rows.length === 0) {
-    const blob = new Blob([''], { type: 'text/csv;charset=utf-8' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = filename.endsWith('.csv') ? filename : `${filename}.csv`;
-    a.click();
-    URL.revokeObjectURL(url);
+    downloadFile(name, 'text/csv;charset=utf-8', '\ufeff');
     return;
   }
-  const headers = Array.from(new Set(rows.flatMap(r => Object.keys(r))));
-  const esc = (val: any) => {
-    if (val === null || val === undefined) return '';
-    const s = String(val).replace(/"/g, '""');
-    return /[",\n;]/.test(s) ? `"${s}"` : s;
-    };
+
+  const headers = Object.keys(rows[0]);
+  const escape = (v: any) => {
+    if (v === null || v === undefined) return '';
+    const s = String(v).replace(/"/g, '""');
+    // siempre entre comillas por seguridad
+    return `"${s}"`;
+  };
+
   const lines = [
-    headers.join(','),
-    ...rows.map(r => headers.map(h => esc(r[h])).join(',')),
-  ];
-  const blob = new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = filename.endsWith('.csv') ? filename : `${filename}.csv`;
-  a.click();
-  URL.revokeObjectURL(url);
+    headers.map(h => escape(h)).join(','),
+    ...rows.map(r => headers.map(h => escape(r[h])).join(','))
+  ].join('\n');
+
+  // Agregamos BOM
+  downloadFile(name, 'text/csv;charset=utf-8', '\ufeff' + lines);
 }

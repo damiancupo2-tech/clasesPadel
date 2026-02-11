@@ -53,34 +53,34 @@ export function BackupRestore() {
         students: state.students.map(student => ({
           ...student,
           createdAt: student.createdAt,
-          accountHistory: (student.accountHistory || []).map(entry => ({
+          accountHistory: ((student.accountHistory || []) || []).map(entry => ({
             ...entry,
             date: entry.date,
             createdAt: entry.createdAt
           }))
         })),
-        classes: state.classes.map(cls => ({
+        classes: (state.classes || []).map(cls => ({
           ...cls,
           date: cls.date,
           createdAt: cls.createdAt
         })),
-        transactions: state.transactions.map(transaction => ({
+        transactions: (state.transactions || []).map(transaction => ({
           ...transaction,
           date: transaction.date
         })),
-        receipts: state.receipts.map(receipt => ({
+        receipts: (state.receipts || []).map(receipt => ({
           ...receipt,
           date: receipt.date,
-          transactions: receipt.transactions.map(t => ({
+          transactions: (receipt.transactions || []).map(t => ({
             ...t,
             date: t.date
           }))
         })),
         metadata: {
-          totalStudents: state.students.length,
-          totalClasses: state.classes.length,
-          totalTransactions: state.transactions.length,
-          totalReceipts: state.receipts.length
+          totalStudents: (state.students || []).length,
+          totalClasses: (state.classes || []).length,
+          totalTransactions: (state.transactions || []).length,
+          totalReceipts: (state.receipts || []).length
         }
       };
 

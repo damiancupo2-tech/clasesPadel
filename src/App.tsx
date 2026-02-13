@@ -13,6 +13,7 @@ function App() {
   const [showAdminMode, setShowAdminMode] = useState(false);
   const [adminPassword, setAdminPassword] = useState('');
   const [isAdminAuthenticated, setIsAdminAuthenticated] = useState(false);
+  const [currentView, setCurrentView] = useState('students');
 
   const handleAdminLogin = (e: React.FormEvent) => {
     e.preventDefault();
@@ -31,8 +32,6 @@ function App() {
   };
 
   if (isAdminAuthenticated) {
-    const [currentView, setCurrentView] = useState('students');
-
     const renderCurrentView = () => {
       switch (currentView) {
         case 'students':

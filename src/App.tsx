@@ -1,5 +1,13 @@
 import React, { useState } from 'react';
 import { ExternalLink, Lock, ArrowRight, Shield } from 'lucide-react';
+import { AppProvider } from './context/AppContext';
+import { Navigation } from './components/Navigation';
+import { StudentList } from './components/StudentList';
+import { Calendar } from './components/Calendar';
+import { BillingModule } from './components/BillingModule';
+import { Reports } from './components/Reports';
+import { ReceiptsHistory } from './components/ReceiptsHistory';
+import { BackupRestore } from './components/BackupRestore';
 
 function App() {
   const [showAdminMode, setShowAdminMode] = useState(false);
@@ -23,16 +31,6 @@ function App() {
   };
 
   if (isAdminAuthenticated) {
-    // Importar dinámicamente los componentes del sistema original
-    const { AppProvider } = require('./context/AppContext');
-    const { Navigation } = require('./components/Navigation');
-    const { StudentList } = require('./components/StudentList');
-    const { Calendar } = require('./components/Calendar');
-    const { BillingModule } = require('./components/BillingModule');
-    const { Reports } = require('./components/Reports');
-    const { ReceiptsHistory } = require('./components/ReceiptsHistory');
-    const { BackupRestore } = require('./components/BackupRestore');
-
     const [currentView, setCurrentView] = useState('students');
 
     const renderCurrentView = () => {
